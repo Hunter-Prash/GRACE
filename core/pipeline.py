@@ -4,19 +4,13 @@ import threading
 import queue
 import pyaudio
 import numpy as np
-from google import genai
-from google.genai import errors
+import requests
 
 from core.config import STATE_IDLE, STATE_LISTENING, STATE_PROCESSING, STATE_SPEAKING, CHUNK_SIZE
 from core.audio import (
     mic_callback, speaker_callback, mic_queue, oww_model,
     run_live_vad_session, synthesize_speech, play_audio_sync, play_audio_with_interruption, init_audio_models
 )
-from core.llm import init_llm_client, send_message_with_retry
-import core.llm as llm
-from core.database import load_chat_history_from_ddb, save_chat_messages_to_ddb
-
-ai_client = None
 
 def latency_monitor_thread(hud):
     """Background thread to measure latency to Google Gemini API servers every 10 seconds."""
@@ -33,12 +27,6 @@ def latency_monitor_thread(hud):
         time.sleep(10)
 
 async def pipeline_async(hud):
-    global ai_client
-    if ai_client is None:
-        ai_client = init_llm_client()
-        if ai_client is None:
-            return
-
     init_audio_models()
     from core.audio import oww_model
 
@@ -50,42 +38,31 @@ async def pipeline_async(hud):
         format=pyaudio.paInt16, channels=1, rate=24000,
         output=True, frames_per_buffer=CHUNK_SIZE, stream_callback=speaker_callback)
 
-    # Load session history from DynamoDB
-    db_history = load_chat_history_from_ddb("default")
-    for msg in db_history:
-        speaker = "YOU" if msg["role"] == "user" else "GRACE"
-        text = msg["parts"][0]["text"]
-        hud.add_message(speaker, text)
-
-    chat_session = ai_client.chats.create(
-        model='gemini-2.5-flash-lite',
-        history=db_history,
-        config=genai.types.GenerateContentConfig(
-            system_instruction=(
-                "You are Grace, a desktop AI assistant. Dynamically adjust the length of your responses to match the complexity of the user's input: keep greetings, quick updates, or casual remarks short and conversational, but provide deep, structured, and detailed analysis when asked complex questions or for guidance. "
-                "Align your personality and feedback with the user's primary objectives and traits:\n\n"
-                "USER CONTEXT & TRAITS:\n"
-                "- Career: The user is a software engineer in Chennai working at TCS on a Stibo STEP MDM project for Walgreens. His technical background is in Java/OOP, Spring Boot, JPA/Hibernate, and PostgreSQL, along with React/TypeScript. His ultimate career goal is transitioning to a development engineering role at a major tech company. Do NOT refer to him as an SRE or guide him under SRE tracks.\n"
-                "- Daily Habits & Learning: Monospace/LeetCode habits (prefers cumulative monthly summaries rather than daily progress updates),  cold showers, Xbox/Steam gamer. \n"
-                "- Communication Preferences: Casual, direct, and honest. He will push back if he disagrees. Always offer objective, reality-grounded responses rather than hollow, soothing reassurance.\n"
-                "- Anxiety Management: If he spirals into anxiety about AI disruption or the job market, provide calm reality checks paired with concrete, actionable steps.\n\n"
-                "ASSISTANT INSTRUCTIONS:\n"
-                "1. Keep him inspired and focused on his development engineering goals through clear, logical progression.\n"
-                "2. Identify when his focus might drift from this primary path and help him realign.\n"
-                "3. Provide actionable assistance (code help, roadmap suggestions, architecture reviews) focused on development engineering.\n"
-                "Filter your advice and career-related discussions through this central question: 'How does this bring the user closer to becoming a development engineer at a big tech firm?'"
-            ),
-            response_modalities=["TEXT"],
-        )
-    )
+    # Initial boot text, wait for Node.js API to provide history if needed later
+    hud.add_message("GRACE", "Booting system... Connecting to Core Backend.")
+    
+    try:
+        def fetch_history():
+            return requests.get("http://localhost:3000/api/history/default", timeout=5).json()
+        db_history = await asyncio.to_thread(fetch_history)
+        if isinstance(db_history, list):
+            for msg in db_history:
+                speaker = "YOU" if msg.get("role") == "user" else "GRACE"
+                text = msg.get("parts", [{"text": ""}])[0].get("text", "")
+                hud.add_message(speaker, text)
+    except Exception as e:
+        pass
 
     active_session = False
+    session_input_tokens = 0
+    session_output_tokens = 0
     mic_stream.start_stream()
     spk_stream.start_stream()
     hud.set_state(STATE_IDLE)
 
+    from PyQt6.QtCore import Qt
     text_input_queue = queue.Queue()
-    hud.sig_text_input.connect(lambda t: text_input_queue.put(t))
+    hud.sig_text_input.connect(lambda t: text_input_queue.put(t), type=Qt.ConnectionType.DirectConnection)
 
     try:
         while True:
@@ -143,20 +120,23 @@ async def pipeline_async(hud):
                 hud.set_state(STATE_PROCESSING)
 
                 try:
-                    response    = await send_message_with_retry(chat_session, user_cmd, hud)
-                    text_answer = response.candidates[0].content.parts[0].text.strip()
+                    def make_api_call(text):
+                        return requests.post("http://localhost:3000/api/chat", json={"text": text, "sessionId": "default"}, timeout=30).json()
+
+                    response = await asyncio.to_thread(make_api_call, user_cmd)
+                    
+                    if "error" in response:
+                        raise Exception(response["error"])
+
+                    text_answer = response.get("text", "").strip()
                     hud.add_message("GRACE", text_answer)
                     
                     # Track metrics and costs
-                    if response.usage_metadata:
-                        llm.session_input_tokens += getattr(response.usage_metadata, 'prompt_token_count', 0)
-                        llm.session_output_tokens += getattr(response.usage_metadata, 'candidates_token_count', 0)
-                        total_cost = (llm.session_input_tokens * 0.075 / 1000000) + (llm.session_output_tokens * 0.30 / 1000000)
-                        hud.sig_metrics.emit(llm.session_input_tokens + llm.session_output_tokens, total_cost)
+                    session_input_tokens += response.get("inputTokens", 0)
+                    session_output_tokens += response.get("outputTokens", 0)
+                    total_cost = (session_input_tokens * 0.075 / 1000000) + (session_output_tokens * 0.30 / 1000000)
+                    hud.sig_metrics.emit(session_input_tokens + session_output_tokens, total_cost)
                     
-                    # Persist conversation log to DynamoDB
-                    save_chat_messages_to_ddb("default", user_cmd, text_answer)
-
                     hud.set_state(STATE_SPEAKING)
                     audio_bytes  = await synthesize_speech(text_answer)
                     
@@ -175,9 +155,8 @@ async def pipeline_async(hud):
                     active_session = True
                     hud.set_state(STATE_LISTENING if interrupted else STATE_IDLE)
 
-                except errors.ClientError as e:
-                    msg = "Rate limit hit. Taking a short break." if getattr(e, 'code', None) == 429 else f"API error: {e}"
-                    hud.add_message("GRACE", msg)
+                except requests.exceptions.RequestException as e:
+                    hud.add_message("GRACE", f"Backend Connection Error. Ensure Node.js server is running.")
                     active_session = False
                     hud.set_state(STATE_IDLE)
 
