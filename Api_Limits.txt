@@ -1,0 +1,20 @@
+What You Get (Free of Charge)
+Input & Output tokens: Completely free of charge.
+
+Context Caching: Free of charge (crucial for when we add large database schemas to Grace's memory later).
+
+2. Limitations & Privacy Trade-offs
+Data Usage: Your prompts and responses are used by Google to improve their products (marked as Yes in the Free Tier column). If you start feeding highly sensitive personal or corporate database entries into Grace later, you may eventually want to switch to the Paid Tier, where data logging is completely turned off (No).
+
+Grounding Features: Live Grounding with Google Search and Google Maps are Not available on the Free Tier. Grace won't be able to fetch real-time web results or navigation data unless you transition to the Paid Tier.
+
+------------------------------------------------------
+Rate Limits
+Even though it's free, you still have plenty of room for daily testing before hitting a wall:
+
+                15 Requests Per Minute (RPM): You can comfortably speak to Grace every few seconds.
+                1,500 Requests Per Day (RPD): Unless you leave Grace running in a loop talking to herself, you won't easily exhaust this during development.
+
+If you ever run into a 429 Resource Exhausted error while testing, it just means you hit the 15-requests-per-minute threshold—simply pause for 60 seconds and she'll be back online.
+
+--------------------------------------------------------------
