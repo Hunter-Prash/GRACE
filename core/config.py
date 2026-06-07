@@ -1,7 +1,6 @@
 import os
 import sys
 import yaml
-import boto3
 
 os.environ["HF_HOME"] = "D:\\PERSONAL\\GRACE\\.cache\\huggingface"
 
@@ -16,12 +15,6 @@ except FileNotFoundError:
     print(f"CRITICAL ERROR: config.yaml not found at {CONFIG_PATH}")
     sys.exit(1)
 
-try:
-    dynamodb = boto3.resource('dynamodb')
-    db_table = dynamodb.Table('GraceChatSessions')
-except Exception as e:
-    print(f"WARNING: Could not connect to AWS DynamoDB resource: {e}")
-    db_table = None
 
 site_packages = next((p for p in sys.path if 'site-packages' in p), None)
 if site_packages:

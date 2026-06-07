@@ -2,7 +2,7 @@ import math
 from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
-from gui.theme import CYAN, GREEN, PINK, AMBER, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
+from gui.theme import CYAN, GREEN, PINK, AMBER, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color, sans
 
 # GLOW LABEL
 # ──────────────────────────────────────────
@@ -352,8 +352,8 @@ class ChatBubble(QFrame):
         lbl_who.setStyleSheet(f"color: {who_color}; background: transparent; border: none; letter-spacing: 2px;")
         
         lbl_txt = QLabel(text)
-        lbl_txt.setFont(mono(9))
-        lbl_txt.setStyleSheet(f"color: {text_color}; background: transparent; border: none; line-height: 1.4;")
+        lbl_txt.setFont(sans(10))
+        lbl_txt.setStyleSheet(f"color: {text_color}; background: transparent; border: none; line-height: 1.5; padding: 2px;")
         lbl_txt.setWordWrap(True)
         lbl_txt.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         

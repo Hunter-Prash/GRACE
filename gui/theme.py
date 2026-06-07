@@ -13,10 +13,16 @@ TEXT_DIM    = "rgba(0, 212, 255, 0.60)"
 BORDER      = "rgba(0, 212, 255, 0.22)"
 BORDER_HOT  = "rgba(0, 212, 255, 0.35)"
 
-FONT_MONO   = "Courier New"
+FONT_MONO   = "Consolas"
+FONT_SANS   = "Segoe UI"
 
 def mono(size=11, bold=False):
     f = QFont(FONT_MONO, size)
+    f.setBold(bold)
+    return f
+
+def sans(size=11, bold=False):
+    f = QFont(FONT_SANS, size)
     f.setBold(bold)
     return f
 

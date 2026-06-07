@@ -2,3 +2,5 @@ config.yaml
 .cache/
 venv/
 __pycache__/
+node_modules/
+backend/.env
