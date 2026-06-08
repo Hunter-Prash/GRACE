@@ -1,6 +1,6 @@
 import math
-from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color, sans
 
@@ -361,6 +361,38 @@ class ChatBubble(QFrame):
         self.lay.addWidget(lbl_txt)
         
         self.color = color
+        
+        # --- FADE IN ANIMATION ---
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.fade_anim.setDuration(400)
+        self.fade_anim.setStartValue(0.0)
+        self.fade_anim.setEndValue(1.0)
+        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self.fade_anim.start()
+        
+        # --- TYPING EFFECT ---
+        self.full_text = text
+        self.lbl_txt = lbl_txt
+        if not is_user:
+            self.lbl_txt.setText("")
+            self.type_idx = 0
+            self.type_timer = QTimer(self)
+            self.type_timer.timeout.connect(self._type_next_char)
+            self.type_timer.start(10)  # Type very fast (10ms per loop)
+            
+    def _type_next_char(self):
+        if self.type_idx < len(self.full_text):
+            # Type chunks to speed it up if it's too long
+            chars_to_type = 2 if len(self.full_text) > 100 else 1
+            self.type_idx += chars_to_type
+            current_text = self.full_text[:self.type_idx]
+            # Add a blinking cursor block at the end
+            self.lbl_txt.setText(current_text + " █")
+        else:
+            self.lbl_txt.setText(self.full_text)
+            self.type_timer.stop()
 
     def add_play_button(self, callback):
         self.btn_play = QPushButton("🔊 PLAY AUDIO")

@@ -1,11 +1,11 @@
 import time
 import math
 import psutil
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy, QTabWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric
 
 class GraceHUD(QMainWindow):
     sig_state   = pyqtSignal(str)
@@ -15,6 +15,8 @@ class GraceHUD(QMainWindow):
     sig_metrics     = pyqtSignal(int, float)
     sig_latency     = pyqtSignal(str)
     sig_text_input  = pyqtSignal(str)
+    sig_db_latency  = pyqtSignal(int)
+    sig_context_saturation = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
@@ -172,10 +174,23 @@ class GraceHUD(QMainWindow):
         return w
 
     def _center_panel(self):
-        panel = CyberPanel("◈ CONVERSATION LOG", CYAN)
+        panel = CyberPanel("◈ CORE DASHBOARD", CYAN)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(12, 16, 12, 12)
         lay.setSpacing(6)
+
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 1px solid {BORDER}; background: transparent; }}
+            QTabBar::tab {{ background: {BG2}; color: {TEXT_DIM}; padding: 6px 12px; margin-right: 2px; border: 1px solid {BORDER}; border-bottom: none; font-family: 'Consolas'; font-size: 11px; }}
+            QTabBar::tab:selected {{ background: rgba(0, 212, 255, 0.1); color: {CYAN}; border: 1px solid {CYAN}; border-bottom: none; }}
+        """)
+
+        # -- TAB 1: CONSOLE --
+        console_tab = QWidget()
+        console_lay = QVBoxLayout(console_tab)
+        console_lay.setContentsMargins(0, 0, 0, 0)
+        console_lay.setSpacing(6)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -190,13 +205,13 @@ class GraceHUD(QMainWindow):
         
         scroll.setWidget(self.chat_container)
         self.scroll_area = scroll
-        lay.addWidget(scroll, 1)
+        console_lay.addWidget(scroll, 1)
 
         # Bottom Awaiting Input Separator & Layout
         div = QFrame()
         div.setFixedHeight(1)
         div.setStyleSheet(f"background: {BORDER};")
-        lay.addWidget(div)
+        console_lay.addWidget(div)
 
         bottom_row = QWidget()
         bottom_lay = QHBoxLayout(bottom_row)
@@ -224,7 +239,26 @@ class GraceHUD(QMainWindow):
         self.btn_send.clicked.connect(self._on_text_send)
         bottom_lay.addWidget(self.btn_send)
         
-        lay.addWidget(bottom_row)
+        console_lay.addWidget(bottom_row)
+
+        # -- TAB 2: TELEMETRY --
+        telemetry_tab = QWidget()
+        telemetry_lay = QVBoxLayout(telemetry_tab)
+        telemetry_lay.setContentsMargins(10, 10, 10, 10)
+        telemetry_lay.setSpacing(10)
+        
+        self.bar_context = TelemetryBar("CONTEXT WINDOW SATURATION", max_val=50, color=CYAN)
+        telemetry_lay.addWidget(self.bar_context)
+        
+        self.metric_db_latency = TelemetryMetric("DYNAMODB READ/WRITE LATENCY", "0ms", GREEN)
+        telemetry_lay.addWidget(self.metric_db_latency)
+        
+        telemetry_lay.addStretch()
+
+        self.tabs.addTab(console_tab, "CONSOLE")
+        self.tabs.addTab(telemetry_tab, "TELEMETRY & ANALYTICS")
+        
+        lay.addWidget(self.tabs)
 
         return panel
 
@@ -332,6 +366,8 @@ class GraceHUD(QMainWindow):
         self.sig_latency.connect(self._on_latency)
         self.sig_wave.connect(self.audio_monitor.update_bars)
         self.sig_wave.connect(self.small_wave.update_bars)
+        self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
+        self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
         self.btn_shutdown.clicked.connect(self.close)
 
     def _start_timers(self):

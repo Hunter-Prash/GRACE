@@ -4,11 +4,11 @@ import queue
 import asyncio
 import pyaudio
 import numpy as np
-import edge_tts
+from kokoro import KPipeline
 from faster_whisper import WhisperModel
 from openwakeword.model import Model
 from core.config import (
-    SILENCE_THRESHOLD, MAX_SILENCE_CHUNKS, CHUNK_SIZE, EDGE_TTS_VOICE,
+    SILENCE_THRESHOLD, MAX_SILENCE_CHUNKS, CHUNK_SIZE, KOKORO_VOICE,
     FFMPEG_PATH, FFPROBE_PATH, STATE_IDLE, STATE_SPEAKING
 )
 
@@ -17,15 +17,19 @@ speaker_queue = queue.Queue()
 
 whisper_model = None
 oww_model = None
+kokoro_pipeline = None
 
 def init_audio_models():
-    global whisper_model, oww_model
+    global whisper_model, oww_model, kokoro_pipeline
     if whisper_model is None:
         print("Loading Whisper onto RTX 3050...")
         whisper_model = WhisperModel("base.en", device="cuda", compute_type="float16")
     if oww_model is None:
         print("Loading openWakeWord...")
         oww_model = Model(wakeword_models=["hey_mycroft"], inference_framework="onnx")
+    if kokoro_pipeline is None:
+        print("Loading Kokoro TTS...")
+        kokoro_pipeline = KPipeline(lang_code='a')
 
 def mic_callback(in_data, frame_count, time_info, status):
     mic_queue.put(in_data)
@@ -42,18 +46,21 @@ def speaker_callback(in_data, frame_count, time_info, status):
     return (data, pyaudio.paContinue)
 
 async def synthesize_speech(text: str) -> bytes:
-    from pydub import AudioSegment
-    AudioSegment.converter = FFMPEG_PATH
-    AudioSegment.ffprobe   = FFPROBE_PATH
-    buf = io.BytesIO()
-    communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            buf.write(chunk["data"])
-    buf.seek(0)
-    seg = AudioSegment.from_mp3(buf)
-    seg = seg.set_frame_rate(24000).set_channels(1).set_sample_width(2)
-    return seg.raw_data
+    """Synthesize speech using Kokoro TTS running locally on GPU."""
+    def _run_kokoro():
+        all_audio = []
+        generator = kokoro_pipeline(text, voice=KOKORO_VOICE, speed=1.0, split_pattern=r'[.!?]+')
+        for _, _, audio in generator:
+            if audio is not None and len(audio) > 0:
+                all_audio.append(audio)
+        if not all_audio:
+            return np.zeros(1, dtype=np.float32)
+        return np.concatenate(all_audio)
+
+    audio_np = await asyncio.to_thread(_run_kokoro)
+    # Kokoro outputs float32 at 24kHz — convert to int16 PCM for pyaudio
+    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+    return audio_int16.tobytes()
 
 def run_live_vad_session(hud):
     with mic_queue.mutex:

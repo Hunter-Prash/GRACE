@@ -11,8 +11,14 @@ app.use(express.json());
 
 app.get('/api/history/:sessionId', async (req, res) => {
     try {
+        const dbStart = performance.now();
         const history = await loadChatHistory(req.params.sessionId);
-        res.json(history);
+        const dbLatencyMs = Math.round(performance.now() - dbStart);
+        res.json({
+            history: history,
+            dbLatencyMs: dbLatencyMs,
+            dbContextItemsCount: history.length
+        });
     } catch (error) {
         console.error("Error fetching history:", error);
         res.status(500).json({ error: "Internal server error", details: error.message });
@@ -39,7 +45,9 @@ app.post('/api/chat', async (req, res) => {
         res.json({
             text: result.text,
             inputTokens: result.inputTokens,
-            outputTokens: result.outputTokens
+            outputTokens: result.outputTokens,
+            dbLatencyMs: result.dbLatencyMs,
+            dbContextItemsCount: result.dbContextItemsCount
         });
 
     } catch (error) {

@@ -29,7 +29,7 @@ if site_packages:
 SILENCE_THRESHOLD = 250
 MAX_SILENCE_CHUNKS = 40
 CHUNK_SIZE = 1280
-EDGE_TTS_VOICE = "en-US-JennyNeural"
+KOKORO_VOICE = "af_heart"  # Options: af_heart, af_bella, af_sarah, bf_emma
 FFMPEG_PATH  = r"C:\Users\Prashant\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
 FFPROBE_PATH = r"C:\Users\Prashant\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffprobe.exe"
 

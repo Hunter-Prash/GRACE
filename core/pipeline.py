@@ -44,12 +44,31 @@ async def pipeline_async(hud):
     try:
         def fetch_history():
             return requests.get("http://localhost:3000/api/history/default", timeout=5).json()
-        db_history = await asyncio.to_thread(fetch_history)
+        db_response = await asyncio.to_thread(fetch_history)
+        if isinstance(db_response, dict) and "history" in db_response:
+            db_history = db_response.get("history", [])
+            hud.sig_db_latency.emit(db_response.get("dbLatencyMs", 0))
+            hud.sig_context_saturation.emit(db_response.get("dbContextItemsCount", len(db_history)))
+        elif isinstance(db_response, list):
+            db_history = db_response
+        else:
+            db_history = []
+            
         if isinstance(db_history, list):
+            last_grace_text = None
             for msg in db_history:
                 speaker = "YOU" if msg.get("role") == "user" else "GRACE"
                 text = msg.get("parts", [{"text": ""}])[0].get("text", "")
                 hud.add_message(speaker, text)
+                if speaker == "GRACE":
+                    last_grace_text = text
+            
+            if last_grace_text:
+                # Pre-generate audio for the very last message in history so you can replay it
+                boot_audio = await synthesize_speech(last_grace_text)
+                hud.attach_play_button_to_latest(lambda checked=False, ab=boot_audio: threading.Thread(
+                    target=play_audio_sync, args=(ab, hud), daemon=True
+                ).start())
     except Exception as e:
         pass
 
@@ -137,11 +156,17 @@ async def pipeline_async(hud):
                     total_cost = (session_input_tokens * 0.075 / 1000000) + (session_output_tokens * 0.30 / 1000000)
                     hud.sig_metrics.emit(session_input_tokens + session_output_tokens, total_cost)
                     
+                    # Track new telemetry
+                    if "dbLatencyMs" in response:
+                        hud.sig_db_latency.emit(response["dbLatencyMs"])
+                    if "dbContextItemsCount" in response:
+                        hud.sig_context_saturation.emit(response["dbContextItemsCount"])
+                    
                     hud.set_state(STATE_SPEAKING)
                     audio_bytes  = await synthesize_speech(text_answer)
                     
                     # Attach play button trigger to the latest bubble
-                    hud.attach_play_button_to_latest(lambda ab=audio_bytes: threading.Thread(
+                    hud.attach_play_button_to_latest(lambda checked=False, ab=audio_bytes: threading.Thread(
                         target=play_audio_sync, args=(ab, hud), daemon=True
                     ).start())
                     
