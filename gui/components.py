@@ -462,3 +462,73 @@ class CyberButton(QPushButton):
             }}
         """)
 
+# ──────────────────────────────────────────
+# TELEMETRY DASHBOARD COMPONENTS
+# ──────────────────────────────────────────
+class TelemetryMetric(QWidget):
+    def __init__(self, title, value="--", color=CYAN, parent=None):
+        super().__init__(parent)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(10, 10, 10, 10)
+        self.lay.setSpacing(4)
+        
+        self.lbl_title = GlowLabel(title, TEXT_DIM, 8)
+        self.lbl_value = GlowLabel(value, color, 18, True)
+        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.lay.addWidget(self.lbl_title)
+        self.lay.addWidget(self.lbl_value)
+        
+        self.setStyleSheet(f"background: rgba(0, 212, 255, 0.03); border: 1px solid {BORDER}; border-radius: 4px;")
+
+    def set_value(self, val):
+        self.lbl_value.setText(str(val))
+
+class TelemetryBar(QWidget):
+    def __init__(self, title, max_val=100, color=CYAN, parent=None):
+        super().__init__(parent)
+        self.max_val = max_val
+        self.current_val = 0
+        self.color = color
+        
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(10, 10, 10, 10)
+        self.lay.setSpacing(8)
+        
+        # Header layout
+        h_lay = QHBoxLayout()
+        self.lbl_title = GlowLabel(title, TEXT_DIM, 8)
+        self.lbl_perc = GlowLabel("0%", color, 8, True)
+        h_lay.addWidget(self.lbl_title)
+        h_lay.addStretch()
+        h_lay.addWidget(self.lbl_perc)
+        
+        # Progress Bar
+        from PyQt6.QtWidgets import QProgressBar
+        self.bar = QProgressBar()
+        self.bar.setFixedHeight(8)
+        self.bar.setTextVisible(False)
+        self.bar.setMaximum(max_val)
+        self.bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {BG2};
+                border: 1px solid {BORDER};
+                border-radius: 2px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {color};
+                border-radius: 1px;
+            }}
+        """)
+        
+        self.lay.addLayout(h_lay)
+        self.lay.addWidget(self.bar)
+        
+        self.setStyleSheet(f"background: rgba(0, 212, 255, 0.03); border: 1px solid {BORDER}; border-radius: 4px;")
+
+    def set_value(self, val):
+        self.current_val = min(val, self.max_val)
+        self.bar.setValue(self.current_val)
+        perc = int((self.current_val / self.max_val) * 100) if self.max_val > 0 else 0
+        self.lbl_perc.setText(f"{perc}%")
+

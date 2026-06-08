@@ -170,27 +170,29 @@ class GraceHUD(QMainWindow):
         sp.addWidget(hint)
         lay.addWidget(sp_panel)
 
+        # Network Telemetry Panel
+        net_panel = CyberPanel("◈ NETWORK", CYAN)
+        nl = QVBoxLayout(net_panel)
+        nl.setContentsMargins(12, 16, 12, 12)
+        nl.setSpacing(8)
+        self.metric_api_latency = TelemetryMetric("GEMINI API", "---ms", AMBER)
+        nl.addWidget(self.metric_api_latency)
+        self.metric_db_latency = TelemetryMetric("AWS DYNAMODB", "---ms", GREEN)
+        nl.addWidget(self.metric_db_latency)
+        lay.addWidget(net_panel)
+
         lay.addStretch()
         return w
 
     def _center_panel(self):
-        panel = CyberPanel("◈ CORE DASHBOARD", CYAN)
+        panel = CyberPanel("◈ CONVERSATION LOG", CYAN)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(12, 16, 12, 12)
         lay.setSpacing(6)
 
-        self.tabs = QTabWidget()
-        self.tabs.setStyleSheet(f"""
-            QTabWidget::pane {{ border: 1px solid {BORDER}; background: transparent; }}
-            QTabBar::tab {{ background: {BG2}; color: {TEXT_DIM}; padding: 6px 12px; margin-right: 2px; border: 1px solid {BORDER}; border-bottom: none; font-family: 'Consolas'; font-size: 11px; }}
-            QTabBar::tab:selected {{ background: rgba(0, 212, 255, 0.1); color: {CYAN}; border: 1px solid {CYAN}; border-bottom: none; }}
-        """)
-
-        # -- TAB 1: CONSOLE --
-        console_tab = QWidget()
-        console_lay = QVBoxLayout(console_tab)
-        console_lay.setContentsMargins(0, 0, 0, 0)
-        console_lay.setSpacing(6)
+        # Context Window Saturation Bar at the very top
+        self.bar_context = TelemetryBar("CONTEXT WINDOW SATURATION", max_val=50, color=CYAN)
+        lay.addWidget(self.bar_context)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -205,13 +207,13 @@ class GraceHUD(QMainWindow):
         
         scroll.setWidget(self.chat_container)
         self.scroll_area = scroll
-        console_lay.addWidget(scroll, 1)
+        lay.addWidget(scroll, 1)
 
         # Bottom Awaiting Input Separator & Layout
         div = QFrame()
         div.setFixedHeight(1)
         div.setStyleSheet(f"background: {BORDER};")
-        console_lay.addWidget(div)
+        lay.addWidget(div)
 
         bottom_row = QWidget()
         bottom_lay = QHBoxLayout(bottom_row)
@@ -239,26 +241,7 @@ class GraceHUD(QMainWindow):
         self.btn_send.clicked.connect(self._on_text_send)
         bottom_lay.addWidget(self.btn_send)
         
-        console_lay.addWidget(bottom_row)
-
-        # -- TAB 2: TELEMETRY --
-        telemetry_tab = QWidget()
-        telemetry_lay = QVBoxLayout(telemetry_tab)
-        telemetry_lay.setContentsMargins(10, 10, 10, 10)
-        telemetry_lay.setSpacing(10)
-        
-        self.bar_context = TelemetryBar("CONTEXT WINDOW SATURATION", max_val=50, color=CYAN)
-        telemetry_lay.addWidget(self.bar_context)
-        
-        self.metric_db_latency = TelemetryMetric("DYNAMODB READ/WRITE LATENCY", "0ms", GREEN)
-        telemetry_lay.addWidget(self.metric_db_latency)
-        
-        telemetry_lay.addStretch()
-
-        self.tabs.addTab(console_tab, "CONSOLE")
-        self.tabs.addTab(telemetry_tab, "TELEMETRY & ANALYTICS")
-        
-        lay.addWidget(self.tabs)
+        lay.addWidget(bottom_row)
 
         return panel
 
@@ -289,15 +272,13 @@ class GraceHUD(QMainWindow):
         sl.addLayout(r)
         r, self.lbl_queries = row("QUERIES",  "0")
         sl.addLayout(r)
-        r, self.lbl_latency = row("LATENCY",  "---")
-        sl.addLayout(r)
         r, self.lbl_tokens  = row("TOKENS",   "0")
         sl.addLayout(r)
         r, self.lbl_cost    = row("COST",     "$0.0000", GREEN)
         sl.addLayout(r)
         r, _ = row("MODEL",   "3.1-FLASH-LITE", CYAN_MID)
         sl.addLayout(r)
-        r, _ = row("TTS",     "EDGE-TTS", GREEN)
+        r, _ = row("TTS",     "KOKORO-82M", GREEN)
         sl.addLayout(r)
         lay.addWidget(sess)
 
@@ -520,8 +501,8 @@ class GraceHUD(QMainWindow):
         self.lbl_tokens.setText(f"{tokens:,}")
         self.lbl_cost.setText(f"${cost:.4f}")
 
-    def _on_latency(self, latency: str):
-        self.lbl_latency.setText(latency)
+    def _on_latency(self, val):
+        self.metric_api_latency.set_value(val)
 
     def _on_text_send(self):
         text = self.text_input.text().strip()
