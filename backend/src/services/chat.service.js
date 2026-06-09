@@ -1,9 +1,5 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { AWS_REGION } from './config.js';
-
-const client = new DynamoDBClient({ region: AWS_REGION });
-const docClient = DynamoDBDocumentClient.from(client);
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { docClient, getISTTimestamp } from './db.client.js';
 
 const TABLE_NAME = "GraceChatSessions";
 
@@ -49,17 +45,13 @@ export async function saveChatMessage(sessionId, userText, graceText) {
         
         history.push({ role: "user", text: userText });
         history.push({ role: "model", text: graceText });
-        
-        if (history.length > 50) {
-            history = history.slice(-50);
-        }
-        
+
         const putCommand = new PutCommand({
             TableName: TABLE_NAME,
             Item: {
                 SessionId: sessionId,
                 History: history,
-                LastUpdated: new Date().toISOString()
+                LastUpdated: getISTTimestamp()
             }
         });
         
