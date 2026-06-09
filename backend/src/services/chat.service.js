@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, getISTTimestamp } from './db.client.js';
 
 const TABLE_NAME = "GraceChatSessions";
@@ -58,5 +58,19 @@ export async function saveChatMessage(sessionId, userText, graceText) {
         await docClient.send(putCommand);
     } catch (e) {
         console.warn(`WARNING: Could not save message: ${e.message}`);
+    }
+}
+
+export async function clearChatHistory(sessionId = "default") {
+    try {
+        const deleteCommand = new DeleteCommand({
+            TableName: TABLE_NAME,
+            Key: { SessionId: sessionId }
+        });
+        await docClient.send(deleteCommand);
+        console.log(`[DB] Erased history for session: ${sessionId}`);
+    } catch (e) {
+        console.error(`ERROR: Could not clear chat history: ${e.message}`);
+        throw e;
     }
 }

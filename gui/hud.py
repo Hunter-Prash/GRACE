@@ -5,7 +5,8 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot
+from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
     sig_state   = pyqtSignal(str)
@@ -17,6 +18,8 @@ class GraceHUD(QMainWindow):
     sig_text_input  = pyqtSignal(str)
     sig_db_latency  = pyqtSignal(int)
     sig_context_saturation = pyqtSignal(int)
+    sig_force_sleep = pyqtSignal()
+    sig_clear_context = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -106,19 +109,22 @@ class GraceHUD(QMainWindow):
 
         lay.addStretch()
 
-        # Right Indicator Dots
+        # Right Indicator Dots (pulsing animated)
         lights = QWidget()
         lights_lay = QHBoxLayout(lights)
         lights_lay.setContentsMargins(10, 0, 0, 0)
-        lights_lay.setSpacing(6)
-        
-        for i, color in enumerate([GREEN, CYAN, CYAN]):
-            dot = QLabel()
-            shade = color if i == 0 else "#00d4ff33"
-            dot.setFixedSize(8, 8)
-            dot.setStyleSheet(f"background: {shade}; border-radius: 4px;")
+        lights_lay.setSpacing(2)
+
+        # Green = system online, two dim cyan = secondary systems
+        dot_online = PulsingDot(GREEN, 7)
+        dot_net    = PulsingDot(CYAN,  6)
+        dot_ai     = PulsingDot(CYAN,  6)
+        # Offset phases so they don't pulse in sync
+        dot_net._phase = 1.0
+        dot_ai._phase  = 2.1
+        for dot in (dot_online, dot_net, dot_ai):
             lights_lay.addWidget(dot)
-            
+
         lay.addWidget(lights)
 
         div = QFrame()
@@ -185,6 +191,36 @@ class GraceHUD(QMainWindow):
         return w
 
     def _center_panel(self):
+        tabs = QTabWidget()
+        tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background: transparent;
+            }}
+            QTabBar::tab {{
+                background: {BG2};
+                color: {CYAN_DIM};
+                border: 1px solid {BORDER};
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 6px 12px;
+                font-family: Consolas, monospace;
+                font-size: 10px;
+                letter-spacing: 1px;
+            }}
+            QTabBar::tab:selected {{
+                background: transparent;
+                color: {CYAN};
+                border: 1px solid {CYAN};
+                border-bottom: none;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: rgba(0, 212, 255, 0.1);
+            }}
+        """)
+        
+        # Tab 1: CONVERSATION LOG
         panel = CyberPanel("◈ CONVERSATION LOG", CYAN)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(12, 16, 12, 12)
@@ -243,7 +279,25 @@ class GraceHUD(QMainWindow):
         
         lay.addWidget(bottom_row)
 
-        return panel
+        tabs.addTab(panel, "LOG")
+        
+        # Tab 2: MANAGE CONVERSATION HISTORY
+        tab2 = CyberPanel("◈ MANAGE CONTEXT", PINK)
+        lay2 = QVBoxLayout(tab2)
+        lay2.setContentsMargins(12, 16, 12, 12)
+        
+        lbl_info = GlowLabel("Deleting the context will erase the current session's chat history from DynamoDB.", TEXT_DIM, 9)
+        lbl_info.setWordWrap(True)
+        lay2.addWidget(lbl_info)
+        
+        self.btn_delete_context = CyberButton("DELETE CURRENT CONTEXT", PINK)
+        self.btn_delete_context.clicked.connect(self.sig_clear_context.emit)
+        lay2.addWidget(self.btn_delete_context)
+        lay2.addStretch()
+        
+        tabs.addTab(tab2, "CONTEXT")
+
+        return tabs
 
     def _right_panel(self):
         w = QWidget()
@@ -304,8 +358,10 @@ class GraceHUD(QMainWindow):
         ac_lay.setSpacing(6)
         
         self.btn_sleep    = CyberButton("SLEEP", CYAN)
+        self.btn_train    = CyberButton("TRAIN VOICE", GREEN)
         self.btn_shutdown = CyberButton("SHUTDOWN", PINK)
         ac_lay.addWidget(self.btn_sleep)
+        ac_lay.addWidget(self.btn_train)
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
 
@@ -350,6 +406,19 @@ class GraceHUD(QMainWindow):
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
         self.btn_shutdown.clicked.connect(self.close)
+        self.btn_train.clicked.connect(self._open_enrollment)
+        self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)
+        
+    def _open_enrollment(self):
+        self.is_enrolling = True
+        dialog = VoiceEnrollmentDialog(self)
+        dialog.exec()
+        self.is_enrolling = False
+        
+        # Clear backlog audio to prevent accidental triggers from stale mic data
+        from core.audio import mic_queue
+        with mic_queue.mutex:
+            mic_queue.queue.clear()
 
     def _start_timers(self):
         self.timer_clock = QTimer()
@@ -440,6 +509,9 @@ class GraceHUD(QMainWindow):
         elif state == "SPEAKING":
             self.lbl_input_state.setText("SPEAKING...")
             self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
+        elif state == "REJECTED":
+            self.lbl_input_state.setText("UNKNOWN SPEAKER REJECTED")
+            self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
             
         self.timer_wave.setInterval(50 if state == "LISTENING" else 40 if state == "SPEAKING" else 80)
 
@@ -479,6 +551,14 @@ class GraceHUD(QMainWindow):
     def _scroll_bottom(self):
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def clear_chat_ui(self):
+        # Clear all child widgets from chat_layout except the stretch
+        while self.chat_layout.count() > 1:
+            item = self.chat_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.latest_bubble = None
 
     # ── THREAD-SAFE SETTERS ───────────────
     def set_state(self, state: str):

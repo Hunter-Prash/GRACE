@@ -1,7 +1,7 @@
 import math
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF
 from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color, sans
 
 # GLOW LABEL
@@ -78,7 +78,47 @@ class CyberPanel(QFrame):
             p.drawText(19, r.top() - th // 2 + fm.ascent(), self.label)
 
 # ──────────────────────────────────────────
-# STAT BAR
+# PULSING DOT (Topbar / Status Indicator)
+# ──────────────────────────────────────────
+class PulsingDot(QWidget):
+    """A small dot that pulses with a soft breathing glow animation."""
+    def __init__(self, color=GREEN, size=8, parent=None):
+        super().__init__(parent)
+        self.color_str = color
+        self.dot_size  = size
+        self.setFixedSize(size + 6, size + 6)
+        self._phase = 0.0
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)  # ~25fps
+
+    def _tick(self):
+        self._phase = (self._phase + 0.12) % (2 * math.pi)
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx = self.width() // 2
+        cy = self.height() // 2
+        ds = self.dot_size
+
+        pulse = (math.sin(self._phase) + 1) / 2   # 0..1
+        # Outer glow halo
+        halo_r = int(ds // 2 + 3 + pulse * 3)
+        halo_alpha = int(20 + pulse * 60)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(self.color_str, halo_alpha))
+        p.drawEllipse(cx - halo_r, cy - halo_r, halo_r * 2, halo_r * 2)
+
+        # Solid core dot
+        core_alpha = int(160 + pulse * 95)
+        p.setBrush(parse_color(self.color_str, core_alpha))
+        p.drawEllipse(cx - ds // 2, cy - ds // 2, ds, ds)
+
+# ──────────────────────────────────────────
+# STAT BAR (with shimmer scan animation)
 # ──────────────────────────────────────────
 class StatBar(QWidget):
     def __init__(self, label, color=CYAN, parent=None):
@@ -86,7 +126,16 @@ class StatBar(QWidget):
         self.label = label
         self.color = color
         self._value = 0
+        self._scan_pos = 0.0   # 0..1, shimmer position
         self.setFixedHeight(22)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(50)
+
+    def _tick(self):
+        self._scan_pos = (self._scan_pos + 0.025) % 1.0
+        self.update()
 
     def setValue(self, v):
         self._value = max(0, min(100, v))
@@ -107,7 +156,7 @@ class StatBar(QWidget):
         tw = w - tx - 44
         
         p.setPen(Qt.PenStyle.NoPen)
-        c_track = parse_color(self.color, 24)  # faint transparent track background
+        c_track = parse_color(self.color, 24)
         p.setBrush(c_track)
         p.drawRoundedRect(tx, h // 2 - 2, tw, 4, 2, 2)
         
@@ -115,6 +164,17 @@ class StatBar(QWidget):
         if fill_w > 0:
             p.setBrush(parse_color(self.color))
             p.drawRoundedRect(tx, h // 2 - 2, fill_w, 4, 2, 2)
+
+            # Shimmer scan highlight within filled area
+            scan_x = tx + int(fill_w * self._scan_pos)
+            shimmer_w = max(6, fill_w // 4)
+            # Clamp shimmer to filled region
+            scan_x = min(scan_x, tx + fill_w - 2)
+            shim_start = max(tx, scan_x - shimmer_w // 2)
+            shim_end   = min(tx + fill_w, scan_x + shimmer_w // 2)
+            if shim_end > shim_start:
+                p.setBrush(parse_color(self.color, 90))
+                p.drawRoundedRect(shim_start, h // 2 - 3, shim_end - shim_start, 6, 2, 2)
             
         # 3. Value on right
         p.setFont(mono(9, True))
@@ -200,7 +260,7 @@ class SmallWaveformWidget(QWidget):
             p.drawRoundedRect(x, y, bw, bh, 1.5, 1.5)
 
 # ──────────────────────────────────────────
-# STATE INDICATOR
+# STATE INDICATOR (with breathing pulse dot)
 # ──────────────────────────────────────────
 class StateIndicator(QWidget):
     STATES = {
@@ -213,7 +273,18 @@ class StateIndicator(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state = "IDLE"
+        self._pulse = 0.0
         self.setFixedHeight(30)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)
+
+    def _tick(self):
+        # Speed up pulse for active states
+        speed = 0.18 if self._state in ("LISTENING", "PROCESSING", "SPEAKING") else 0.08
+        self._pulse = (self._pulse + speed) % (2 * math.pi)
+        self.update()
         
     def set_state(self, s):
         self._state = s
@@ -233,64 +304,123 @@ class StateIndicator(QWidget):
         
         total_w = 8 + 8 + tw
         start_x = (w - total_w) // 2
-        
+
+        pulse = (math.sin(self._pulse) + 1) / 2   # 0..1
+
+        # Outer breathing halo
+        halo_r = int(7 + pulse * 4)
+        halo_alpha = int(30 + pulse * 80)
         p.setPen(Qt.PenStyle.NoPen)
-        c_glow = parse_color(color, 100)
-        p.setBrush(c_glow)
+        p.setBrush(parse_color(color, halo_alpha))
+        cx_dot = start_x + 4
+        cy_dot = h // 2
+        p.drawEllipse(cx_dot - halo_r + 4, cy_dot - halo_r, halo_r * 2, halo_r * 2)
+
+        # Middle glow ring
+        p.setBrush(parse_color(color, int(60 + pulse * 60)))
         p.drawEllipse(start_x - 1, h // 2 - 5, 10, 10)
         
-        p.setBrush(parse_color(color))
+        # Solid core dot
+        p.setBrush(parse_color(color, int(180 + pulse * 75)))
         p.drawEllipse(start_x, h // 2 - 4, 8, 8)
         
+        # State text
         p.setPen(parse_color(color))
         p.drawText(start_x + 16, (h - th) // 2 + fm.ascent(), text)
 
 # ──────────────────────────────────────────
-# STATUS RING (Concentric Animated HUD Circle)
+# STATUS RING (Dual orbit dots + arc sweep)
 # ──────────────────────────────────────────
 class StatusRing(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state = "IDLE"
-        self.setFixedSize(72, 72)
-        self._angle = 0
+        self.setFixedSize(80, 80)
+        self._angle  = 0      # primary dot angle
+        self._angle2 = 180    # secondary dot (counter-rotating)
+        self._arc_span = 0    # animated arc span
+        self._arc_growing = True
         
         # Rotating dot timer
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._rotate)
-        self.timer.start(30)
+        self.timer.start(28)
         
     def set_state(self, state):
         self._state = state
         self.update()
         
     def _rotate(self):
-        self._angle = (self._angle + 2) % 360
+        speed = 3 if self._state == "PROCESSING" else 2 if self._state in ("LISTENING", "SPEAKING") else 1
+        self._angle  = (self._angle  + speed) % 360
+        self._angle2 = (self._angle2 - speed) % 360  # counter-rotate
+
+        # Arc breathes in/out
+        arc_speed = 3 if self._state == "PROCESSING" else 2
+        if self._arc_growing:
+            self._arc_span += arc_speed
+            if self._arc_span >= 120:
+                self._arc_growing = False
+        else:
+            self._arc_span -= arc_speed
+            if self._arc_span <= 20:
+                self._arc_growing = True
+
         self.update()
         
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        color_str = CYAN if self._state in ["LISTENING", "IDLE"] else (AMBER if self._state == "PROCESSING" else PINK)
+        color_str = (
+            CYAN  if self._state in ("LISTENING", "IDLE") else
+            AMBER if self._state == "PROCESSING" else
+            PINK
+        )
         color = parse_color(color_str)
         
         w, h = self.width(), self.height()
         cx, cy = w // 2, h // 2
         
-        r_outer = 28
-        r_inner = 20
-        
-        # Outer ring
-        p.setPen(QPen(parse_color(CYAN_DIM), 1))
+        r_outer  = 32
+        r_mid    = 24
+        r_inner  = 16
+
+        # ── Outermost dim ring ──────────────────
+        p.setPen(QPen(parse_color(CYAN_DIM, 60), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(cx - r_outer, cy - r_outer, r_outer * 2, r_outer * 2)
-        
-        # Inner ring
-        p.setPen(QPen(parse_color(BORDER), 1))
+
+        # ── Animated glowing arc on outer ring ─
+        arc_pen = QPen(parse_color(color_str, 140), 2)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arc_pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        arc_rect = QRectF(cx - r_outer, cy - r_outer, r_outer * 2, r_outer * 2)
+        # Qt arc: start & span in 1/16ths of a degree
+        arc_start = int((self._angle - self._arc_span // 2) * 16)
+        p.drawArc(arc_rect, arc_start, int(self._arc_span * 16))
+
+        # ── Mid ring ────────────────────────────
+        p.setPen(QPen(parse_color(BORDER, 80), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(cx - r_mid, cy - r_mid, r_mid * 2, r_mid * 2)
+
+        # ── Inner ring (tiny tick marks) ────────
+        p.setPen(QPen(parse_color(color_str, 45), 1))
         p.drawEllipse(cx - r_inner, cy - r_inner, r_inner * 2, r_inner * 2)
-        
-        # Center Text "GRACE"
+
+        # Tick marks on inner ring (4 cardinal points)
+        for deg in (0, 90, 180, 270):
+            rad = math.radians(deg)
+            x1 = cx + (r_inner - 2) * math.cos(rad)
+            y1 = cy + (r_inner - 2) * math.sin(rad)
+            x2 = cx + (r_inner + 3) * math.cos(rad)
+            y2 = cy + (r_inner + 3) * math.sin(rad)
+            p.setPen(QPen(parse_color(color_str, 90), 1))
+            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # ── Center Text "GRACE" ──────────────────
         p.setPen(parse_color(TEXT_DIM))
         p.setFont(mono(8, True))
         fm = p.fontMetrics()
@@ -298,18 +428,28 @@ class StatusRing(QWidget):
         th = fm.height()
         p.drawText(cx - tw // 2, cy + th // 2 - fm.descent() - 2, "GRACE")
         
-        # Revolving dot on outer ring
+        # ── Primary revolving dot (outer ring) ──
         rad = math.radians(self._angle)
         dot_x = cx + r_outer * math.cos(rad)
         dot_y = cy + r_outer * math.sin(rad)
-        
+
         p.setPen(Qt.PenStyle.NoPen)
-        c_glow = parse_color(color_str, 100)
-        p.setBrush(c_glow)
-        p.drawEllipse(int(dot_x - 4), int(dot_y - 4), 8, 8)
-        
+        # Glow halo
+        p.setBrush(parse_color(color_str, 70))
+        p.drawEllipse(int(dot_x - 5), int(dot_y - 5), 10, 10)
+        # Bright core
         p.setBrush(color)
         p.drawEllipse(int(dot_x - 3), int(dot_y - 3), 6, 6)
+
+        # ── Secondary counter-rotating dot (mid ring) ──
+        rad2 = math.radians(self._angle2)
+        dot2_x = cx + r_mid * math.cos(rad2)
+        dot2_y = cy + r_mid * math.sin(rad2)
+
+        p.setBrush(parse_color(color_str, 55))
+        p.drawEllipse(int(dot2_x - 4), int(dot2_y - 4), 8, 8)
+        p.setBrush(parse_color(color_str, 160))
+        p.drawEllipse(int(dot2_x - 2), int(dot2_y - 2), 4, 4)
 
 # ──────────────────────────────────────────
 # CHAT BUBBLE
@@ -466,8 +606,13 @@ class CyberButton(QPushButton):
 # TELEMETRY DASHBOARD COMPONENTS
 # ──────────────────────────────────────────
 class TelemetryMetric(QWidget):
+    """Network latency display with a sweeping scan-line animation."""
     def __init__(self, title, value="--", color=CYAN, parent=None):
         super().__init__(parent)
+        self.color_str = color
+        self._scan = 0.0   # 0..1 horizontal sweep position
+        self.setMinimumHeight(60)
+
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(10, 10, 10, 10)
         self.lay.setSpacing(4)
@@ -480,6 +625,31 @@ class TelemetryMetric(QWidget):
         self.lay.addWidget(self.lbl_value)
         
         self.setStyleSheet(f"background: rgba(0, 212, 255, 0.03); border: 1px solid {BORDER}; border-radius: 4px;")
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)
+
+    def _tick(self):
+        self._scan = (self._scan + 0.018) % 1.0
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # Sweep scan line across the widget
+        scan_x = int(self._scan * (w + 40)) - 20
+        grad = QConicalGradient(scan_x, h // 2, 0)
+        c = parse_color(self.color_str, 0)
+        c2 = parse_color(self.color_str, 28)
+        # Draw a faint vertical sweep bar
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(self.color_str, 18))
+        bar_w = max(8, w // 6)
+        p.drawRect(max(0, scan_x - bar_w // 2), 0, bar_w, h)
 
     def set_value(self, val):
         self.lbl_value.setText(str(val))
@@ -531,4 +701,3 @@ class TelemetryBar(QWidget):
         self.bar.setValue(self.current_val)
         perc = int((self.current_val / self.max_val) * 100) if self.max_val > 0 else 0
         self.lbl_perc.setText(f"{perc}%")
-

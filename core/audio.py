@@ -49,7 +49,7 @@ async def synthesize_speech(text: str) -> bytes:
     """Synthesize speech using Kokoro TTS running locally on GPU."""
     def _run_kokoro():
         all_audio = []
-        generator = kokoro_pipeline(text, voice=KOKORO_VOICE, speed=1.0, split_pattern=r'[.!?]+')
+        generator = kokoro_pipeline(text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
         for _, _, audio in generator:
             if audio is not None and len(audio) > 0:
                 all_audio.append(audio)

@@ -11,6 +11,8 @@ from core.audio import (
     mic_callback, speaker_callback, mic_queue, oww_model,
     run_live_vad_session, synthesize_speech, play_audio_sync, play_audio_with_interruption, init_audio_models
 )
+from core.biometrics import init_biometrics, verify_speaker, has_voice_profile
+from collections import deque
 
 def latency_monitor_thread(hud):
     """Background thread to measure latency to Google Gemini API servers every 10 seconds."""
@@ -28,6 +30,11 @@ def latency_monitor_thread(hud):
 
 async def pipeline_async(hud):
     init_audio_models()
+    try:
+        init_biometrics()
+    except Exception as e:
+        print(f"Failed to initialize biometrics: {e}")
+        
     from core.audio import oww_model
 
     audio = pyaudio.PyAudio()
@@ -82,9 +89,20 @@ async def pipeline_async(hud):
     from PyQt6.QtCore import Qt
     text_input_queue = queue.Queue()
     hud.sig_text_input.connect(lambda t: text_input_queue.put(t), type=Qt.ConnectionType.DirectConnection)
+    
+    cmd_queue = queue.Queue()
+    hud.sig_force_sleep.connect(lambda: cmd_queue.put("SLEEP"), type=Qt.ConnectionType.DirectConnection)
+    hud.sig_clear_context.connect(lambda: cmd_queue.put("CLEAR_CONTEXT"), type=Qt.ConnectionType.DirectConnection)
+    
+    # 3-second rolling buffer for speaker verification (approx 40 chunks if 1280 chunk_size)
+    audio_buffer = deque(maxlen=40)
 
     try:
         while True:
+            if getattr(hud, "is_enrolling", False):
+                await asyncio.sleep(0.1)
+                continue
+
             user_cmd = None
             is_text_cmd = False
 
@@ -94,14 +112,59 @@ async def pipeline_async(hud):
                 is_text_cmd = True
             except queue.Empty:
                 pass
+                
+            try:
+                sys_cmd = cmd_queue.get_nowait()
+                if sys_cmd == "SLEEP":
+                    active_session = False
+                    hud.set_state(STATE_IDLE)
+                    audio_buffer.clear()
+                    with mic_queue.mutex:
+                        mic_queue.queue.clear()
+                    hud.add_message("GRACE", "System going to sleep. Say the wake word to activate.")
+                    continue
+                elif sys_cmd == "CLEAR_CONTEXT":
+                    try:
+                        resp = requests.delete("http://localhost:3000/api/history/default", timeout=5)
+                        if resp.status_code == 200:
+                            hud.clear_chat_ui()
+                            hud.add_message("GRACE", "Context erased. Starting fresh.")
+                            hud.sig_context_saturation.emit(0)
+                        else:
+                            hud.add_message("GRACE", "Failed to clear context.")
+                    except Exception as e:
+                        hud.add_message("GRACE", f"Error connecting to backend: {e}")
+                    continue
+            except queue.Empty:
+                pass
 
             if not active_session:
                 try:
                     data = mic_queue.get(timeout=0.1)
                     pcm  = np.frombuffer(data, dtype=np.int16)
+                    audio_buffer.append(pcm)
+                    
                     pred = oww_model.predict(pcm)
                     if pred['hey_mycroft'] > 0.75:
-                        active_session = True
+                        if has_voice_profile():
+                            # Reconstruct the last ~3 seconds of audio to verify who said the wake word
+                            verification_data = np.concatenate(list(audio_buffer))
+                            is_match, score = verify_speaker(verification_data)
+                            if is_match:
+                                active_session = True
+                            else:
+                                print(f"[!] WAKE WORD REJECTED. Unknown Speaker (Score: {score:.3f})")
+                                hud.set_state("REJECTED")
+                                audio_buffer.clear()
+                                # Pause slightly before returning to IDLE
+                                await asyncio.sleep(1.5)
+                                hud.set_state(STATE_IDLE)
+                        else:
+                            active_session = True
+                            
+                        if active_session:
+                            audio_buffer.clear()
+                            
                 except queue.Empty:
                     continue
 

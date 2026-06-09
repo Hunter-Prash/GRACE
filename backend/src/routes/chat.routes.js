@@ -1,6 +1,6 @@
 import express from 'express';
 import { processChat } from '../services/llm.service.js';
-import { saveChatMessage, loadChatHistory } from '../services/chat.service.js';
+import { saveChatMessage, loadChatHistory, clearChatHistory } from '../services/chat.service.js';
 
 const router = express.Router();
 
@@ -20,10 +20,20 @@ router.get('/history/:sessionId', async (req, res) => {
     }
 });
 
+router.delete('/history/:sessionId', async (req, res) => {
+    try {
+        await clearChatHistory(req.params.sessionId);
+        res.json({ success: true, message: "Chat history cleared" });
+    } catch (error) {
+        console.error("Error clearing history:", error);
+        res.status(500).json({ error: "Internal server error", details: error.message });
+    }
+});
+
 router.post('/chat', async (req, res) => {
     try {
         const { text, sessionId = "default" } = req.body;
-        
+
         if (!text) {
             return res.status(400).json({ error: "Text is required" });
         }
@@ -31,10 +41,10 @@ router.post('/chat', async (req, res) => {
         console.log(`[POST /api/chat] User: ${text}`);
 
         const result = await processChat(sessionId, text);
-        
+
         // Save to DB asynchronously after responding
         saveChatMessage(sessionId, text, result.text).catch(console.error);
-        
+
         console.log(`[POST /api/chat] Grace: ${result.text}`);
 
         res.json({
