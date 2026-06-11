@@ -3,11 +3,11 @@ import { getDailyMetrics, updateDailyMetrics } from '../services/metrics.service
 
 const router = express.Router();
 
-router.get('/:date', async (req, res) => {
+router.get('/get_metrics', async (req, res) => {
     try {
         const { date } = req.params;
-        const metrics = await getDailyMetrics(date);
-        
+        const metrics = await getDailyMetrics();
+
         if (!metrics) {
             return res.status(404).json({ message: "No metrics found for this date" });
         }

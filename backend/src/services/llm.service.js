@@ -1,6 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_API_KEY } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
+import { createGoal, updateMilestone } from './goals.service.js';
+import { updateDailyMetrics } from './metrics.service.js';
 
 let aiClient = null;
 
@@ -57,16 +59,120 @@ You are being built over months. Right now you are in early stages. But you alwa
 
 Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"`;
 
-    // Initialize chat
+    // 1. Define the exact tools Grace is allowed to use
+    const tools = [{
+        functionDeclarations: [
+            {
+                name: "createGoal",
+                description: "Creates a new overarching project or goal for Prashant.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        goalId: { type: "STRING", description: "A short, dashed ID like 'learn-aws'" },
+                        status: { type: "STRING", description: "Always 'Active'" },
+                        category: { type: "STRING" },
+                        description: { type: "STRING" },
+                        milestones: { type: "OBJECT", description: "A map of milestone strings to boolean false, e.g. {'buy-book': false}" }
+                    },
+                    required: ["goalId", "category", "description", "milestones"]
+                }
+            },
+            {
+                name: "updateMilestone",
+                description: "Marks a specific milestone within a goal as complete or incomplete.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        goalId: { type: "STRING" },
+                        milestoneKey: { type: "STRING" },
+                        isComplete: { type: "BOOLEAN" }
+                    },
+                    required: ["goalId", "milestoneKey", "isComplete"]
+                }
+            },
+            {
+                name: "updateDailyMetrics",
+                description: "Logs Prashant's daily habits, mood, energy, or focus. Call this whenever he mentions completing a habit or feeling a certain way.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        habits: { type: "ARRAY", items: { type: "STRING" }, description: "List of habits completed today" },
+                        mood_score: { type: "INTEGER", description: "Score from 1 to 10" },
+                        energy_lvl: { type: "INTEGER", description: "Score from 1 to 10" },
+                        core_focus: { type: "STRING" }
+                    }
+                }
+            }
+        ]
+    }];
+
+    // Initialize chat with tools
+
     const chat = aiClient.chats.create({
         model: 'gemini-3.1-flash-lite',
         history: dbHistory,
         config: {
-            systemInstruction: systemInstruction
+            systemInstruction: systemInstruction,
+            tools: tools
         }
     });
 
-    const response = await chat.sendMessage({ message: userText });
+    let response = await chat.sendMessage({ message: userText });
+
+    // 2. The Execution Loop
+    // If Gemini decides to call a function, it won't return text. It will return functionCalls.
+    while (response.functionCalls && response.functionCalls.length > 0) {
+        const functionResponses = []; // Array to hold all results
+
+        // Process ALL parallel function calls that Gemini requested
+        for (const call of response.functionCalls) {
+            console.log(`[LLM TOOL CALLED] Grace invoked: ${call.name}`);
+
+            let toolResult = {};
+            /*
+            
+             the responsibility is split cleanly into two halves:
+
+Gemini does the thinking: It reads your prompt, figures out which function to call, extracts the right parameters from your conversation, and returns a JSON data structure requesting the execution.
+
+You do the doing: Your local JavaScript code intercepts that JSON request, physically runs the matching local function (like updateDailyMetrics()), and handles the real-world database side of things.
+
+Gemini never executes your code directly. It doesn't have access to your server, your local database, or your file system.
+*/
+            try {
+                // 3. Execute the actual backend functions
+                if (call.name === "createGoal") {
+                    const args = call.args;
+                    await createGoal(args.goalId, args.status || "Active", args.category, args.milestones, args.description);
+                    toolResult = { success: true, message: `Goal ${args.goalId} created.` };
+                }
+                else if (call.name === "updateMilestone") {
+                    const args = call.args;
+                    await updateMilestone(args.goalId, args.milestoneKey, args.isComplete);
+                    toolResult = { success: true, message: `Milestone ${args.milestoneKey} updated.` };
+                }
+                else if (call.name === "updateDailyMetrics") {
+                    const args = call.args;
+                    await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus);
+                    toolResult = { success: true, message: `Daily metrics updated.` };
+                }
+            } catch (e) {
+                console.error(`Tool execution failed: ${e.message}`);
+                toolResult = { success: false, error: e.message };
+            }
+
+            // Add this specific tool's result to our payload
+            functionResponses.push({
+                functionResponse: {
+                    name: call.name,
+                    response: toolResult
+                }
+            });
+        }
+
+        // 4. Send ALL results BACK to Gemini in one single shot
+        response = await chat.sendMessage(functionResponses);
+    }
 
     let inputTokens = 0;
     let outputTokens = 0;

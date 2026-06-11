@@ -56,10 +56,10 @@ export async function updateDailyMetrics(habits, mood_score, energy_lvl, core_fo
     }
 }
 
-export async function getDailyMetrics(dateStr = null) {
+export async function getDailyMetrics() {
     try {
         // Default to today if no date is passed
-        const targetDate = dateStr || getISTTimestamp().split('T')[0];
+        const targetDate = getISTTimestamp().split('T')[0];
 
         const params = {
             TableName: "Grace_DailyMetrics",

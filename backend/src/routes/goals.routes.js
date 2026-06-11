@@ -16,13 +16,13 @@ router.get('/active', async (req, res) => {
 router.post('/', async (req, res) => {
     try {
         const { goalId, status = "Active", category, milestones = {}, description = "" } = req.body;
-        
+
         if (!goalId) {
             return res.status(400).json({ error: "goalId is required" });
         }
 
         await createGoal(goalId, status, category, milestones, description);
-        
+
         res.status(201).json({ message: "Goal created successfully", goalId });
     } catch (error) {
         console.error("Error in POST /api/goals:", error);
@@ -34,7 +34,7 @@ router.patch('/:goalId/milestone', async (req, res) => {
     try {
         const { goalId } = req.params;
         const { milestoneKey, isComplete } = req.body;
-        
+
         if (!milestoneKey || typeof isComplete !== 'boolean') {
             return res.status(400).json({ error: "milestoneKey and a boolean isComplete are required" });
         }
