@@ -226,14 +226,14 @@ async def pipeline_async(hud):
                         hud.sig_context_saturation.emit(response["dbContextItemsCount"])
                     
                     hud.set_state(STATE_SPEAKING)
-                    audio_bytes  = await synthesize_speech(text_answer)
                     
-                    # Attach play button trigger to the latest bubble
+                    from core.audio import stream_synthesize_and_play
+                    interrupted, audio_bytes = await stream_synthesize_and_play(text_answer, hud)
+                    
+                    # Attach play button trigger to the latest bubble after it finishes generating
                     hud.attach_play_button_to_latest(lambda checked=False, ab=audio_bytes: threading.Thread(
                         target=play_audio_sync, args=(ab, hud), daemon=True
                     ).start())
-                    
-                    interrupted  = await play_audio_with_interruption(audio_bytes)
 
                     if not interrupted:
                         await asyncio.sleep(0.5)
