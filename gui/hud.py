@@ -5,12 +5,12 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
     sig_state   = pyqtSignal(str)
-    sig_message = pyqtSignal(str, str)
+    sig_message = pyqtSignal(str, str, list)
     sig_wave    = pyqtSignal(list)
     sig_attach_play = pyqtSignal(object)
     sig_metrics     = pyqtSignal(int, float)
@@ -365,6 +365,15 @@ class GraceHUD(QMainWindow):
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
 
+        # Matrix Data Stream
+        stream_panel = CyberPanel("◈ RAW DATA STREAM", CYAN)
+        stream_lay = QVBoxLayout(stream_panel)
+        stream_lay.setContentsMargins(12, 16, 12, 12)
+        self.matrix_stream = HexMatrixStream(CYAN_DIM)
+        self.matrix_stream.setFixedHeight(90)
+        stream_lay.addWidget(self.matrix_stream)
+        lay.addWidget(stream_panel)
+
         lay.addStretch()
         return w
 
@@ -515,13 +524,18 @@ class GraceHUD(QMainWindow):
             
         self.timer_wave.setInterval(50 if state == "LISTENING" else 40 if state == "SPEAKING" else 80)
 
-    def _on_message(self, speaker: str, text: str):
+    def _on_message(self, speaker: str, text: str, tools: list):
         if self.latest_bubble:
             try:
                 self.latest_bubble.remove_play_button()
             except Exception:
                 pass
             self.latest_bubble = None
+
+        if tools:
+            tools_str = ", ".join(tools)
+            badge_html = f"<br><br><span style='color: #888888; font-size: 10px;'><i>🛠️ Tools: {tools_str}</i></span>"
+            text += badge_html
 
         bubble = ChatBubble(speaker, text)
         
@@ -564,8 +578,8 @@ class GraceHUD(QMainWindow):
     def set_state(self, state: str):
         self.sig_state.emit(state)
 
-    def add_message(self, speaker: str, text: str):
-        self.sig_message.emit(speaker, text)
+    def add_message(self, speaker: str, text: str, tools: list = None):
+        self.sig_message.emit(speaker, text, tools or [])
 
     def set_waveform(self, bars: list):
         self.sig_wave.emit(bars)

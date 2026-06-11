@@ -22,6 +22,15 @@ class CyberPanel(QFrame):
         self.label = label
         self.glow  = glow
         self.setStyleSheet("background: transparent; border: none;")
+        
+        self._phase = 0.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(50)
+        
+    def _tick(self):
+        self._phase = (self._phase + 0.05) % (2 * math.pi)
+        self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -42,7 +51,8 @@ class CyberPanel(QFrame):
         p.drawRoundedRect(r, 6, 6)
         
         # 3. Corner brackets decoration
-        c_glow = parse_color(self.glow, 120)
+        pulse = (math.sin(self._phase) + 1) / 2
+        c_glow = parse_color(self.glow, int(60 + pulse * 140))
         p.setPen(QPen(c_glow, 1))
         cs = 8  # length of bracket
         offset = 4
@@ -660,6 +670,7 @@ class TelemetryBar(QWidget):
         self.max_val = max_val
         self.current_val = 0
         self.color = color
+        self._scan = 0.0
         
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(10, 10, 10, 10)
@@ -673,31 +684,93 @@ class TelemetryBar(QWidget):
         h_lay.addStretch()
         h_lay.addWidget(self.lbl_perc)
         
-        # Progress Bar
-        from PyQt6.QtWidgets import QProgressBar
-        self.bar = QProgressBar()
-        self.bar.setFixedHeight(8)
-        self.bar.setTextVisible(False)
-        self.bar.setMaximum(max_val)
-        self.bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: {BG2};
-                border: 1px solid {BORDER};
-                border-radius: 2px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {color};
-                border-radius: 1px;
-            }}
-        """)
-        
         self.lay.addLayout(h_lay)
-        self.lay.addWidget(self.bar)
+        
+        self.bar_space = QWidget()
+        self.bar_space.setFixedHeight(12)
+        self.lay.addWidget(self.bar_space)
         
         self.setStyleSheet(f"background: rgba(0, 212, 255, 0.03); border: 1px solid {BORDER}; border-radius: 4px;")
 
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(45)
+
+    def _tick(self):
+        self._scan = (self._scan + 0.02) % 1.0
+        self.update()
+
     def set_value(self, val):
         self.current_val = min(val, self.max_val)
-        self.bar.setValue(self.current_val)
         perc = int((self.current_val / self.max_val) * 100) if self.max_val > 0 else 0
         self.lbl_perc.setText(f"{perc}%")
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        bx = self.bar_space.x()
+        by = self.bar_space.y()
+        bw = self.bar_space.width()
+        bh = self.bar_space.height()
+        
+        # Track
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(BG2))
+        p.drawRoundedRect(bx, by, bw, bh, 2, 2)
+        
+        # Fill
+        fill_w = int(bw * (self.current_val / max(1, self.max_val)))
+        if fill_w > 0:
+            p.setBrush(parse_color(self.color, 160))
+            p.drawRoundedRect(bx, by, fill_w, bh, 2, 2)
+            
+            # Shimmer
+            scan_x = bx + int(fill_w * self._scan)
+            shim_w = 20
+            scan_x = min(scan_x, bx + fill_w)
+            shim_start = max(bx, scan_x - shim_w // 2)
+            shim_end   = min(bx + fill_w, scan_x + shim_w // 2)
+            if shim_end > shim_start:
+                p.setBrush(parse_color(self.color, 255))
+                p.drawRoundedRect(shim_start, by, shim_end - shim_start, bh, 2, 2)
+        
+        # Grid lines
+        p.setPen(parse_color(BORDER, 80))
+        for i in range(1, 10):
+            gx = bx + (bw * i) // 10
+            p.drawLine(gx, by, gx, by + bh)
+
+# ──────────────────────────────────────────
+# HEX MATRIX STREAMER
+# ──────────────────────────────────────────
+import random
+class HexMatrixStream(QWidget):
+    def __init__(self, color=CYAN_DIM, parent=None):
+        super().__init__(parent)
+        self.color = color
+        self.lines = ["" for _ in range(6)]
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(80)
+
+    def _tick(self):
+        for i in range(len(self.lines)):
+            if random.random() > 0.2:
+                self.lines[i] = " ".join(f"{random.randint(0, 255):02X}" for _ in range(8))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setFont(mono(7))
+        h = self.height()
+        w = self.width()
+        step = h // max(1, len(self.lines))
+        for i, text in enumerate(self.lines):
+            # random opacity flicker
+            alpha = int(40 + random.random() * 80)
+            p.setPen(parse_color(self.color, alpha))
+            p.drawText(0, i * step, w, step, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)

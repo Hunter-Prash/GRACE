@@ -52,7 +52,8 @@ router.post('/chat', async (req, res) => {
             inputTokens: result.inputTokens,
             outputTokens: result.outputTokens,
             dbLatencyMs: result.dbLatencyMs,
-            dbContextItemsCount: result.dbContextItemsCount
+            dbContextItemsCount: result.dbContextItemsCount,
+            toolsUsed: result.toolsUsed
         });
 
     } catch (error) {

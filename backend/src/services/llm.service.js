@@ -1,8 +1,9 @@
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_API_KEY } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
-import { createGoal, updateMilestone } from './goals.service.js';
+import { createGoal, updateMilestone, getActiveGoals } from './goals.service.js';
 import { updateDailyMetrics } from './metrics.service.js';
+import { openResource } from './osManager.service.js';
 
 let aiClient = null;
 
@@ -102,6 +103,25 @@ Filter every career-related response through this question: "How does this move 
                         core_focus: { type: "STRING" }
                     }
                 }
+            },
+            {
+                name: "openResource",
+                description: "Opens a desktop application or resource on the user's computer. Call this whenever the user asks to open an app like Chrome, VSCode, Spotify, etc.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        resourceName: { type: "STRING", description: "The name of the application to open, e.g., 'chrome', 'vscode', 'terminal', 'spotify'" }
+                    },
+                    required: ["resourceName"]
+                }
+            },
+            {
+                name: "getActiveGoals",
+                description: "Fetches all of Prashant's currently active goals and their milestones from the database. Use this when you need to know what goals exist, what the milestone keys are, or when he asks for a status update on his goals.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {} // No parameters needed
+                }
             }
         ]
     }];
@@ -118,6 +138,7 @@ Filter every career-related response through this question: "How does this move 
     });
 
     let response = await chat.sendMessage({ message: userText });
+    const toolsUsed = [];
 
     // 2. The Execution Loop
     // If Gemini decides to call a function, it won't return text. It will return functionCalls.
@@ -127,6 +148,7 @@ Filter every career-related response through this question: "How does this move 
         // Process ALL parallel function calls that Gemini requested
         for (const call of response.functionCalls) {
             console.log(`[LLM TOOL CALLED] Grace invoked: ${call.name}`);
+            toolsUsed.push(call.name);
 
             let toolResult = {};
             /*
@@ -156,6 +178,16 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus);
                     toolResult = { success: true, message: `Daily metrics updated.` };
                 }
+                else if (call.name === 'openResource') {
+                    const args = call.args;
+                    const result = await openResource(args.resourceName);
+
+                    toolResult = result;
+                }
+                else if (call.name === 'getActiveGoals') {
+                    const goals = await getActiveGoals();
+                    toolResult = { success: true, activeGoals: goals };
+                }
             } catch (e) {
                 console.error(`Tool execution failed: ${e.message}`);
                 toolResult = { success: false, error: e.message };
@@ -170,8 +202,8 @@ Gemini never executes your code directly. It doesn't have access to your server,
             });
         }
 
-        // 4. Send ALL results BACK to Gemini in one single shot
-        response = await chat.sendMessage(functionResponses);
+        // 4. Send  results BACK to Gemini in one single shot
+        response = await chat.sendMessage({ message: functionResponses });
     }
 
     let inputTokens = 0;
@@ -187,6 +219,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         inputTokens,
         outputTokens,
         dbLatencyMs,
-        dbContextItemsCount
+        dbContextItemsCount,
+        toolsUsed
     };
 }

@@ -4,13 +4,22 @@ import { docClient, getISTTimestamp } from './db.client.js';
 // Create Grace Goal
 export async function createGoal(GoalId, status, category, milestones, description) {
     try {
+        // Enforce lowercase and hyphens for all milestone keys
+        const normalizedMilestones = {};
+        if (milestones) {
+            for (const [key, value] of Object.entries(milestones)) {
+                const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                normalizedMilestones[normalizedKey] = value;
+            }
+        }
+
         const putCommand = new PutCommand({
             TableName: "Grace_Goals",
             Item: {
                 GoalId: GoalId,
                 Status: status,
                 Category: category,
-                Milestones: milestones,
+                Milestones: normalizedMilestones,
                 Description: description,
                 LastUpdated: getISTTimestamp()
             }
@@ -28,13 +37,13 @@ export async function getActiveGoals() {
             TableName: "Grace_Goals",
             FilterExpression: "#status = :active",
             ExpressionAttributeNames: {
-                "#status": "Status" 
+                "#status": "Status"
             },
             ExpressionAttributeValues: {
                 ":active": "Active"
             }
         });
-        
+
         const response = await docClient.send(scanCommand);
         return response.Items || [];
     } catch (e) {
@@ -46,6 +55,9 @@ export async function getActiveGoals() {
 // Update a specific milestone without overwriting the whole map
 export async function updateMilestone(GoalId, milestoneKey, isComplete) {
     try {
+        // Enforce the same normalization during updates
+        const normalizedMilestoneKey = milestoneKey.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
         const updateCommand = new UpdateCommand({
             TableName: "Grace_Goals",
             Key: {
@@ -53,7 +65,7 @@ export async function updateMilestone(GoalId, milestoneKey, isComplete) {
             },
             UpdateExpression: "SET Milestones.#milestoneKey = :isComplete, LastUpdated = :now",
             ExpressionAttributeNames: {
-                "#milestoneKey": milestoneKey
+                "#milestoneKey": normalizedMilestoneKey
             },
             ExpressionAttributeValues: {
                 ":isComplete": isComplete,
@@ -61,24 +73,24 @@ export async function updateMilestone(GoalId, milestoneKey, isComplete) {
             },
             ReturnValues: "ALL_NEW"
         });
-        
+
         const response = await docClient.send(updateCommand);
         const updatedGoal = response.Attributes;
-        
+
         // Auto-complete logic
         if (updatedGoal && updatedGoal.Milestones) {
             const allComplete = Object.values(updatedGoal.Milestones).every(val => val === true);
             if (allComplete && updatedGoal.Status !== "Completed") {
                 console.log(`[Goals Engine] All milestones complete for ${GoalId}. Auto-completing goal!`);
                 await updateGoalStatus(GoalId, "Completed");
-                updatedGoal.Status = "Completed"; 
+                updatedGoal.Status = "Completed";
             }
         }
 
         return updatedGoal;
-    } catch (e) {
-        console.error(`WARNING: Could not update milestone: ${e.message}`);
-        throw e;
+    } catch (error) {
+        console.error("Error updating milestone:", error);
+        throw error;
     }
 }
 
@@ -100,7 +112,7 @@ export async function updateGoalStatus(GoalId, status) {
             },
             ReturnValues: "ALL_NEW"
         });
-        
+
         const response = await docClient.send(updateCommand);
         return response.Attributes;
     } catch (e) {

@@ -210,8 +210,9 @@ async def pipeline_async(hud):
                     if "error" in response:
                         raise Exception(response["error"])
 
+                    tools_used = response.get("toolsUsed", [])
                     text_answer = response.get("text", "").strip()
-                    hud.add_message("GRACE", text_answer)
+                    hud.add_message("GRACE", text_answer, tools=tools_used)
                     
                     # Track metrics and costs
                     session_input_tokens += response.get("inputTokens", 0)
