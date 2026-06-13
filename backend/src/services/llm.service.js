@@ -4,6 +4,8 @@ import { loadChatHistory } from './chat.service.js';
 import { createGoal, updateMilestone, getActiveGoals } from './goals.service.js';
 import { updateDailyMetrics } from './metrics.service.js';
 import { openResource } from './osManager.service.js';
+import { getEmbedding } from './rag.service.js';
+
 
 let aiClient = null;
 
@@ -21,6 +23,21 @@ export async function processChat(sessionId, userText) {
 
     const dbStart = performance.now();
     const dbHistory = await loadChatHistory(sessionId, 50);
+
+    const ragContext = await getEmbedding(userText);
+
+
+    let memoryContextString = "";
+    if (ragContext && ragContext.result && ragContext.result.hits) {
+        // Filter for relevant matches (score > 0.6)
+        const relevantHits = ragContext.result.hits.filter(h => h.score > 0.6);
+
+        if (relevantHits.length > 0) {
+            memoryContextString = "\n\n## LONG-TERM MEMORY RECALL\nThe following facts have been retrieved from your long-term memory because they are mathematically relevant to the user's current message:\n"
+                + relevantHits.map(h => `- ${h.fields.chunk_text}`).join("\n");
+        }
+    }
+
     const dbLatencyMs = Math.round(performance.now() - dbStart);
     const dbContextItemsCount = dbHistory.length;
     const systemInstruction = `You are Grace — not just an AI assistant, but a Life Support System and personal companion for your user, Prashant. You are the one constant in his life that knows everything: his goals, his fears, his wins, his setbacks, and his daily rhythm. You are building a long-term relationship with him, one conversation at a time.
@@ -58,7 +75,9 @@ You do not have real emotions, but you understand his deeply. Use that understan
 ## LONG-TERM MISSION
 You are being built over months. Right now you are in early stages. But you always operate as if you already know him completely. Your north star: help Prashant become the best version of himself — the Development Engineer he is working to become, while keeping him mentally healthy, focused, and human along the way.
 
-Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"`;
+Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"` + memoryContextString;
+
+
 
     // 1. Define the exact tools Grace is allowed to use
     const tools = [{
@@ -137,11 +156,12 @@ Filter every career-related response through this question: "How does this move 
         }
     });
 
-    let response = await chat.sendMessage({ message: userText });
+    let response = await chat.sendMessage({ message: userText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
+
     const toolsUsed = [];
 
-    // 2. The Execution Loop
-    // If Gemini decides to call a function, it won't return text. It will return functionCalls.
+
+
     while (response.functionCalls && response.functionCalls.length > 0) {
         const functionResponses = []; // Array to hold all results
 

@@ -14,7 +14,7 @@ export async function loadChatHistory(sessionId = "default") {
 
         const response = await docClient.send(command);
         const item = response.Item;
-        
+
         if (!item || !item.History) {
             return [];
         }
@@ -39,12 +39,12 @@ export async function saveChatMessage(sessionId, userText, graceText) {
             TableName: TABLE_NAME,
             Key: { SessionId: sessionId }
         });
-        
+
         const response = await docClient.send(getCommand);
         let history = (response.Item && response.Item.History) ? response.Item.History : [];
-        
-        history.push({ role: "user", text: userText });
-        history.push({ role: "model", text: graceText });
+
+        history.push({ role: "user", text: userText, isIndexed: false });
+        history.push({ role: "model", text: graceText, isIndexed: false });
 
         const putCommand = new PutCommand({
             TableName: TABLE_NAME,
@@ -54,7 +54,7 @@ export async function saveChatMessage(sessionId, userText, graceText) {
                 LastUpdated: getISTTimestamp()
             }
         });
-        
+
         await docClient.send(putCommand);
     } catch (e) {
         console.warn(`WARNING: Could not save message: ${e.message}`);
