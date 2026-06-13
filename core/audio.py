@@ -5,6 +5,7 @@ import asyncio
 import threading
 import pyaudio
 import numpy as np
+import re
 from kokoro import KPipeline
 from faster_whisper import WhisperModel
 from openwakeword.model import Model
@@ -49,8 +50,9 @@ def speaker_callback(in_data, frame_count, time_info, status):
 async def synthesize_speech(text: str) -> bytes:
     """Synthesize speech using Kokoro TTS running locally on GPU."""
     def _run_kokoro():
+        clean_text = re.sub(r'[*`~_#]', '', text)
         all_audio = []
-        generator = kokoro_pipeline(text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
+        generator = kokoro_pipeline(clean_text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
         for _, _, audio in generator:
             if audio is not None and len(audio) > 0:
                 all_audio.append(audio)
@@ -74,7 +76,8 @@ async def stream_synthesize_and_play(text: str, hud) -> tuple[bool, bytes]:
     
     def _run_kokoro():
         try:
-            generator = kokoro_pipeline(text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
+            clean_text = re.sub(r'[*`~_#]', '', text)
+            generator = kokoro_pipeline(clean_text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
             for _, _, audio in generator:
                 if interrupted[0]:
                     break

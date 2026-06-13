@@ -3,10 +3,7 @@ import { Pinecone } from '@pinecone-database/pinecone'
 const pc = new Pinecone({ apiKey: 'pcsk_5vyAMm_BhH2yg9Y5YbSkPxK3xkorca4wWtdJ3wJLDJvKb94RJu4BaRMiwx8SeYHpcnmf5Q' })
 
 //target the index
-const index = pc.index("grace-longterm-memory", "https://grace-longterm-memory-4ev813t.svc.aped-4627-b74a.pinecone.io").namespace
-    ("memory")
-
-
+const index = pc.index("grace-longterm-memory", "https://grace-longterm-memory-4ev813t.svc.aped-4627-b74a.pinecone.io").namespace("memory")
 
 // Write a bare-bones function which embeds the system instruction given to gemini so that it has initial memory
 export const seedInitialMemory = async () => {
@@ -43,11 +40,10 @@ export const seedInitialMemory = async () => {
     console.log("Memory successfully seeded!");
 }
 
-
 //THE INDEXER -WRITING MEMORIES
 export const upsertQuery = async (records) => {
     // Upsert the records into a namespace this automatically creates 768D embedding and stores in the db
-    await index.upsertRecords(records);
+    await index.upsertRecords({ records });
 
     // Wait for the upserted vectors to be indexed
     await new Promise(resolve => setTimeout(resolve, 10000));
@@ -57,24 +53,43 @@ export const upsertQuery = async (records) => {
     console.log(stats);
 }
 
-
 //THE RETRIVER-READING MEMORIES
-export const getEmbedding = async (query) => {
+export const getEmbedding = async (query, topK = 10) => {
     // Search the index
     //this automatically performs vector search on the input query text and returns the top K most similar vectors
     //the results are sorted by similarity score in descending order
     const results = await index.searchRecords({
         query: {
-            topK: 10,
+            topK: topK,
             inputs: { text: query },
         },
     });
 
     // Print the results
     results.result.hits.forEach(hit => {
-        console.log(`id: ${hit.id}, score: ${hit.score.toFixed(2)}, category: ${hit.fields.category}, text: ${hit.fields.chunk_text}`);
+        console.log(`id: ${hit._id}, score: ${hit._score.toFixed(2)}, category: ${hit.fields.category}, text: ${hit.fields.text}`);
     });
     return results
 }
 
+export const getRagStats = async () => {
+    try {
+        const start = performance.now();
+        const stats = await index.describeIndexStats();
+        const latencyMs = Math.round(performance.now() - start);
+        return { ...stats, latencyMs };
+    } catch (e) {
+        console.error("Error fetching Pinecone stats:", e);
+        return null;
+    }
+}
 
+export const clearPineconeMemory = async () => {
+    try {
+        await index.deleteAll();
+        console.log("[Pinecone] All long-term vectors have been deleted.");
+    } catch (e) {
+        console.error("Error clearing Pinecone memory:", e);
+        throw e;
+    }
+}

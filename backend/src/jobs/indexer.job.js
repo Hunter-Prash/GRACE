@@ -1,9 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { upsertQuery } from "../services/rag.service.js";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { upsertQuery, getEmbedding } from "../services/rag.service.js";
+import { getISTTimestamp } from "../services/db.client.js";
 
-// We instantiate a dedicated client for the background job to keep it decoupled from the core LLM service
-// (Requires process.env.GEMINI_API_KEY to be set in your environment)
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -25,7 +24,7 @@ export const runMemoryIndexer = async (unindexedConversations) => {
     const MAX_CHARS_PER_BATCH = 500000; // Extremely safe ceiling
     const rawBatches = [];
     let currentBatch = "";
-    
+
     // Split by messages to avoid cutting sentences in half
     const lines = fullTranscript.split("\n\n");
     for (const line of lines) {
@@ -42,28 +41,43 @@ export const runMemoryIndexer = async (unindexedConversations) => {
 
     // 3. Summarization with Gemini 2.5 Flash Lite
     const allSummarizedFacts = [];
+    const todayIST = getISTTimestamp().split('T')[0];
     const summarizationPrompt = `
 You are a memory archivist for Grace, a Life OS. 
-Extract a bulleted list of only the concrete facts, life events, decisions, and preferences from this chat transcript.
+Extract a bulleted list of only the concrete facts, life events, decisions, and preferences from the NEW TRANSCRIPT.
 Completely ignore small talk, greetings, filler words, and routine task outputs. 
 Keep it concise and highly factual.
 
-CRITICAL INSTRUCTION: You MUST prefix every single bullet point with the exact date: [${new Date().toISOString().split('T')[0]}].
+*** DEDUPLICATION RULES ***
+1. If a fact in the NEW TRANSCRIPT means the exact same thing as a fact in the [EXISTING KNOWLEDGE] block, IGNORE IT. Do not extract it.
+2. If a fact in the NEW TRANSCRIPT contradicts the [EXISTING KNOWLEDGE] (e.g. user changed their mind), DO EXTRACT IT so we can record the state change.
+
+CRITICAL INSTRUCTION: You MUST prefix every single bullet point with the exact date: [${todayIST}].
 Example: 
-- [${new Date().toISOString().split('T')[0]}] Prashant decided to focus on Go instead of Java.
+- [${todayIST}] Prashant decided to focus on Go instead of Java.
     `;
 
     for (let i = 0; i < rawBatches.length; i++) {
         if (i > 0) {
             console.log("[Indexer] Sleeping for 8 seconds to respect the 15 RPM API limit...");
-            await sleep(8000); 
+            await sleep(8000);
         }
 
         console.log(`[Indexer] Sending Batch ${i + 1} to gemini-2.5-flash-lite for summarization...`);
         try {
+            console.log(`[Indexer] Searching Pinecone for existing context...`);
+            const pineconeRes = await getEmbedding(rawBatches[i], 15);
+            let existingKnowledgeStr = "";
+            if (pineconeRes && pineconeRes.result && pineconeRes.result.hits) {
+                const hits = pineconeRes.result.hits.filter(h => h.score > 0.3); // Filter out absolute junk
+                if (hits.length > 0) {
+                    existingKnowledgeStr = hits.map(h => `- ${h.fields.text || h.fields.chunk_text}`).join("\n");
+                }
+            }
+
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-lite',
-                contents: `${summarizationPrompt}\n\nTRANSCRIPT:\n${rawBatches[i]}`
+                contents: `${summarizationPrompt}\n\n[EXISTING KNOWLEDGE]\n${existingKnowledgeStr || "None."}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
             });
 
             allSummarizedFacts.push(response.text);
@@ -74,15 +88,15 @@ Example:
 
     const finalSummaryString = allSummarizedFacts.join("\n\n");
     if (!finalSummaryString.trim()) {
-         console.log("[Indexer] No meaningful facts were extracted from this session. Skipping Pinecone upsert.");
-         return 0;
+        console.log("[Indexer] No meaningful facts were extracted from this session. Skipping Pinecone upsert.");
+        return 0;
     }
 
     // 4. Chunking the CLEAN data with LangChain
     console.log("[Indexer] Feeding clean facts into LangChain Text Splitter...");
     const splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 400,   
-        chunkOverlap: 50, 
+        chunkSize: 400,
+        chunkOverlap: 50,
     });
 
     const documents = await splitter.createDocuments([finalSummaryString]);
@@ -97,6 +111,6 @@ Example:
 
     await upsertQuery(pineconeRecords);
     console.log("[Indexer] Successfully vectorized and stored pure, high-signal memories in Pinecone!");
-    
+
     return pineconeRecords.length;
 }

@@ -28,6 +28,17 @@ def latency_monitor_thread(hud):
             hud.sig_latency.emit("OFFLINE")
         time.sleep(10)
 
+def rag_monitor_thread(hud):
+    """Background thread to fetch RAG and DB stats from the backend every 15 seconds."""
+    while True:
+        try:
+            resp = requests.get("http://localhost:3000/api/rag/stats", timeout=3.0)
+            if resp.status_code == 200:
+                hud.sig_rag_stats.emit(resp.json())
+        except Exception:
+            pass
+        time.sleep(15)
+
 async def pipeline_async(hud):
     init_audio_models()
     try:
@@ -82,6 +93,8 @@ async def pipeline_async(hud):
     active_session = False
     session_input_tokens = 0
     session_output_tokens = 0
+    rate_limit_tracker = deque()
+    last_toaster_time = 0
     mic_stream.start_stream()
     spk_stream.start_stream()
     hud.set_state(STATE_IDLE)
@@ -92,7 +105,8 @@ async def pipeline_async(hud):
     
     cmd_queue = queue.Queue()
     hud.sig_force_sleep.connect(lambda: cmd_queue.put("SLEEP"), type=Qt.ConnectionType.DirectConnection)
-    hud.sig_clear_context.connect(lambda: cmd_queue.put("CLEAR_CONTEXT"), type=Qt.ConnectionType.DirectConnection)
+    hud.sig_clear_dynamo.connect(lambda: cmd_queue.put("CLEAR_DYNAMO"), type=Qt.ConnectionType.DirectConnection)
+    hud.sig_clear_pinecone.connect(lambda: cmd_queue.put("CLEAR_PINECONE"), type=Qt.ConnectionType.DirectConnection)
     
     # 3-second rolling buffer for speaker verification (approx 40 chunks if 1280 chunk_size)
     audio_buffer = deque(maxlen=40)
@@ -123,15 +137,25 @@ async def pipeline_async(hud):
                         mic_queue.queue.clear()
                     hud.add_message("GRACE", "System going to sleep. Say the wake word to activate.")
                     continue
-                elif sys_cmd == "CLEAR_CONTEXT":
+                elif sys_cmd == "CLEAR_DYNAMO":
                     try:
                         resp = requests.delete("http://localhost:3000/api/history/default", timeout=5)
                         if resp.status_code == 200:
                             hud.clear_chat_ui()
-                            hud.add_message("GRACE", "Context erased. Starting fresh.")
+                            hud.add_message("GRACE", "DynamoDB Short-Term Context erased. Starting fresh.")
                             hud.sig_context_saturation.emit(0)
                         else:
-                            hud.add_message("GRACE", "Failed to clear context.")
+                            hud.add_message("GRACE", "Failed to clear DynamoDB context.")
+                    except Exception as e:
+                        hud.add_message("GRACE", f"Error connecting to backend: {e}")
+                    continue
+                elif sys_cmd == "CLEAR_PINECONE":
+                    try:
+                        resp = requests.delete("http://localhost:3000/api/pinecone", timeout=5)
+                        if resp.status_code == 200:
+                            hud.add_message("GRACE", "Pinecone Long-Term Context completely wiped.")
+                        else:
+                            hud.add_message("GRACE", "Failed to clear Pinecone memory.")
                     except Exception as e:
                         hud.add_message("GRACE", f"Error connecting to backend: {e}")
                     continue
@@ -215,10 +239,25 @@ async def pipeline_async(hud):
                     hud.add_message("GRACE", text_answer, tools=tools_used)
                     
                     # Track metrics and costs
-                    session_input_tokens += response.get("inputTokens", 0)
-                    session_output_tokens += response.get("outputTokens", 0)
+                    req_in = response.get("inputTokens", 0)
+                    req_out = response.get("outputTokens", 0)
+                    session_input_tokens += req_in
+                    session_output_tokens += req_out
                     total_cost = (session_input_tokens * 0.075 / 1000000) + (session_output_tokens * 0.30 / 1000000)
                     hud.sig_metrics.emit(session_input_tokens + session_output_tokens, total_cost)
+                    
+                    # Rate Limit Sliding Window Tracker
+                    curr_time = time.time()
+                    rate_limit_tracker.append((curr_time, req_in + req_out))
+                    while rate_limit_tracker and curr_time - rate_limit_tracker[0][0] > 60:
+                        rate_limit_tracker.popleft()
+                    
+                    rpm = len(rate_limit_tracker)
+                    tpm = sum(t for _, t in rate_limit_tracker)
+                    if rpm >= 12 or tpm >= 200000:
+                        if curr_time - last_toaster_time > 10:
+                            hud.sig_alert_toaster.emit(f"⚠️ 80% RATE LIMIT REACHED ⚠️\n{rpm}/15 RPM | {tpm:,}/250K TPM")
+                            last_toaster_time = curr_time
                     
                     # Track new telemetry
                     if "dbLatencyMs" in response:

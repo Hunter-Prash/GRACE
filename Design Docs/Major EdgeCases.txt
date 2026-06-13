@@ -1,8 +1,0 @@
-Long answer (and a fun edge case): Because she reads the last 50 chat messages before responding, she "remembers" the milestones you recently created. However, if you created the goal 3 weeks ago, it won't be in her recent chat history!
-
-If that happens, and you say "I finished the AWS module", she might guess the key wrong (e.g., she might try to update "aws-module" instead of "finish-module").
-
-To fix that in the future, we would either:
-
-Inject your active goals directly into her System Prompt.
-Give her a get_goals tool so she can search the database for the correct key before she runs the update!

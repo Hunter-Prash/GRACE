@@ -1,6 +1,6 @@
 import math
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF
-from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QPoint
+from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color, sans
 
@@ -752,13 +752,26 @@ class HexMatrixStream(QWidget):
         super().__init__(parent)
         self.color = color
         self.lines = ["" for _ in range(6)]
+        self.mode = "FAST"
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(80)
 
+    def set_color(self, color):
+        self.color = color
+        self.update()
+
+    def set_speed(self, mode):
+        self.mode = mode
+        if mode == "CALM":
+            self.timer.setInterval(250)
+        else:
+            self.timer.setInterval(80)
+
     def _tick(self):
+        chance = 0.05 if self.mode == "CALM" else 0.2
         for i in range(len(self.lines)):
-            if random.random() > 0.2:
+            if random.random() > chance:
                 self.lines[i] = " ".join(f"{random.randint(0, 255):02X}" for _ in range(8))
         self.update()
 
@@ -771,6 +784,199 @@ class HexMatrixStream(QWidget):
         step = h // max(1, len(self.lines))
         for i, text in enumerate(self.lines):
             # random opacity flicker
-            alpha = int(40 + random.random() * 80)
+            base_alpha = 20 if self.mode == "CALM" else 40
+            flicker = 30 if self.mode == "CALM" else 80
+            alpha = int(base_alpha + random.random() * flicker)
             p.setPen(parse_color(self.color, alpha))
             p.drawText(0, i * step, w, step, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+
+# ──────────────────────────────────────────
+# ANIMATED SIDE PANE (API QUOTA CAROUSEL)
+# ──────────────────────────────────────────
+class AnimatedSidePane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(0)
+        self.setMinimumWidth(0)
+        self.is_open = False
+        
+        self.setStyleSheet(f"background: {BG2}; border-left: 1px solid {BORDER};")
+        
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(12, 16, 12, 12)
+        main_lay.setSpacing(10)
+        
+        # Header
+        header_lay = QHBoxLayout()
+        header_lay.setContentsMargins(0,0,0,0)
+        title = GlowLabel("API LIMITS", CYAN, 10, True)
+        self.btn_close = CyberButton("X", PINK)
+        self.btn_close.setFixedWidth(30)
+        self.btn_close.clicked.connect(self.toggle)
+        
+        header_lay.addWidget(title, 1)
+        header_lay.addWidget(self.btn_close, 0)
+        main_lay.addLayout(header_lay)
+        
+        # Carousel
+        self.carousel = QStackedWidget()
+        self.carousel.setStyleSheet("background: transparent; border: none;")
+        
+        # Page 1: Indexer Model (2.5 Flash Lite)
+        page1 = QWidget()
+        p1_lay = QVBoxLayout(page1)
+        p1_lay.setContentsMargins(0,10,0,0)
+        p1_lay.addWidget(GlowLabel("INDEXER MODEL", PINK, 9, True))
+        p1_lay.addWidget(GlowLabel("Gemini 2.5 Flash Lite", TEXT_DIM, 8))
+        p1_lay.addSpacing(10)
+        
+        self.lbl_idx_usage = GlowLabel("TODAY: 0 / 20", CYAN, 11, True)
+        p1_lay.addWidget(self.lbl_idx_usage)
+        p1_lay.addWidget(GlowLabel("Limits: 15 RPM | 20 RPD | 250k TPM", TEXT_DIM, 8))
+        p1_lay.addStretch()
+        self.carousel.addWidget(page1)
+
+        # Page 2: Main Model (3.1 Flash Lite)
+        page2 = QWidget()
+        p2_lay = QVBoxLayout(page2)
+        p2_lay.setContentsMargins(0,10,0,0)
+        p2_lay.addWidget(GlowLabel("MAIN MODEL", AMBER, 9, True))
+        p2_lay.addWidget(GlowLabel("Gemini 3.1 Flash Lite", TEXT_DIM, 8))
+        p2_lay.addSpacing(10)
+        
+        self.lbl_main_usage = GlowLabel("TODAY: 0 / 500", CYAN, 11, True)
+        p2_lay.addWidget(self.lbl_main_usage)
+        p2_lay.addWidget(GlowLabel("Limits: 20 RPM | 500 RPD | 250k TPM", TEXT_DIM, 8))
+        p2_lay.addStretch()
+        self.carousel.addWidget(page2)
+        
+        main_lay.addWidget(self.carousel, 1)
+        
+        # Nav row
+        nav_lay = QHBoxLayout()
+        nav_lay.setContentsMargins(0,0,0,0)
+        self.btn_prev = CyberButton("<", CYAN_MID)
+        self.btn_next = CyberButton(">", CYAN_MID)
+        
+        self.btn_prev.clicked.connect(self._prev)
+        self.btn_next.clicked.connect(self._next)
+        
+        nav_lay.addWidget(self.btn_prev)
+        nav_lay.addStretch()
+        nav_lay.addWidget(self.btn_next)
+        main_lay.addLayout(nav_lay)
+        
+        # Animation
+        self.anim = QPropertyAnimation(self, b"maximumWidth")
+        self.anim.setDuration(400)
+        self.anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+    def toggle(self):
+        if self.is_open:
+            self.anim.setStartValue(250)
+            self.anim.setEndValue(0)
+            self.is_open = False
+        else:
+            self.anim.setStartValue(0)
+            self.anim.setEndValue(250)
+            self.is_open = True
+        self.anim.start()
+        
+    def _prev(self):
+        curr = self.carousel.currentIndex()
+        if curr > 0:
+            self.carousel.setCurrentIndex(curr - 1)
+        
+    def _next(self):
+        curr = self.carousel.currentIndex()
+        if curr < self.carousel.count() - 1:
+            self.carousel.setCurrentIndex(curr + 1)
+            
+    def update_usage(self, main_queries: int):
+        # We calculate the indexer runs natively! Since 40 messages = 1 run.
+        indexer_runs = main_queries // 40
+        self.lbl_main_usage.setText(f"TODAY: {main_queries} / 500")
+        self.lbl_idx_usage.setText(f"TODAY: {indexer_runs} / 20")
+
+# ──────────────────────────────────────────
+# DANGER ZONE CONFIRMATION DIALOG
+# ──────────────────────────────────────────
+class DangerConfirmDialog(QDialog):
+    def __init__(self, message, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("DANGER ZONE")
+        self.setFixedSize(400, 200)
+        self.setStyleSheet(f"background-color: #0b0e14; border: 2px solid #ff4444; border-radius: 8px;")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(15)
+        
+        title = GlowLabel("⚠️ DANGER ZONE ⚠️", "#ff4444", 14, True)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(title)
+        
+        msg = GlowLabel(message, "#8892b0", 10)
+        msg.setWordWrap(True)
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(msg)
+        
+        lay.addStretch()
+        
+        btn_lay = QHBoxLayout()
+        btn_lay.setSpacing(15)
+        
+        btn_no = CyberButton("CANCEL", "#00d4ff")
+        btn_no.clicked.connect(self.reject)
+        
+        btn_yes = CyberButton("YES, NUKE IT", "#ff4444")
+        btn_yes.clicked.connect(self.accept)
+        
+        btn_lay.addWidget(btn_no)
+        btn_lay.addWidget(btn_yes)
+        
+        lay.addLayout(btn_lay)
+
+# ──────────────────────────────────────────
+# TOASTER MESSAGE
+# ──────────────────────────────────────────
+class ToasterMessage(QWidget):
+    def __init__(self, message, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(300, 80)
+        self.setStyleSheet(f"background-color: #0b0e14; border: 1px solid #ffb000; border-radius: 6px;")
+        
+        lay = QVBoxLayout(self)
+        
+        lbl = GlowLabel(message, "#ffb000", 9, True)
+        lbl.setWordWrap(True)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(lbl)
+        
+        self.raise_()
+        self.show()
+        
+        if parent:
+            self.start_pos = parent.rect().topRight() + QPoint(-320, -100)
+            self.end_pos = parent.rect().topRight() + QPoint(-320, 20)
+            self.move(self.start_pos)
+            
+            self.anim = QPropertyAnimation(self, b"pos")
+            self.anim.setDuration(400)
+            self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self.anim.setStartValue(self.start_pos)
+            self.anim.setEndValue(self.end_pos)
+            
+            self.timer = QTimer(self)
+            self.timer.setSingleShot(True)
+            self.timer.timeout.connect(self.hide_toaster)
+            
+            self.anim.finished.connect(lambda: self.timer.start(4000))
+            self.anim.start()
+
+    def hide_toaster(self):
+        self.anim.setDirection(QPropertyAnimation.Direction.Backward)
+        self.anim.finished.disconnect()
+        self.anim.finished.connect(self.deleteLater)
+        self.anim.start()

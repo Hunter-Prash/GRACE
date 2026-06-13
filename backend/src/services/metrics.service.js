@@ -5,9 +5,8 @@ import { docClient, getISTTimestamp } from './db.client.js';
 // UPSERT Daily Metrics
 export async function updateDailyMetrics(habits, mood_score, energy_lvl, core_focus) {
     try {
-        const timestampMs = getISTTimestamp();
-        const isoString = new Date(timestampMs).toISOString();
-        const todayStr = isoString.split('T')[0]; // Guarantees "YYYY-MM-DD" 
+        const isoString = getISTTimestamp();
+        const todayStr = isoString.split('T')[0]; // Guarantees "YYYY-MM-DD" in IST
 
         let updateParts = ["#lastUpdated = :now"];
         let expressionAttributeValues = {

@@ -1,11 +1,16 @@
 import time
 import math
 import psutil
+import json
+import os
+from datetime import datetime, timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy, QTabWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, DangerConfirmDialog, ToasterMessage
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -16,9 +21,13 @@ class GraceHUD(QMainWindow):
     sig_metrics     = pyqtSignal(int, float)
     sig_latency     = pyqtSignal(str)
     sig_text_input  = pyqtSignal(str)
+    sig_clear_dynamo = pyqtSignal()
+    sig_clear_pinecone = pyqtSignal()
     sig_db_latency  = pyqtSignal(int)
     sig_context_saturation = pyqtSignal(int)
+    sig_rag_stats   = pyqtSignal(dict)
     sig_force_sleep = pyqtSignal()
+    sig_alert_toaster = pyqtSignal(str)
     sig_clear_context = pyqtSignal()
 
     def __init__(self):
@@ -26,7 +35,7 @@ class GraceHUD(QMainWindow):
         self.setWindowTitle("GRACE // CORE HUD")
         self.setMinimumSize(1100, 660)
         self.session_start = time.time()
-        self.query_count   = 0
+        self.query_count   = self._load_quota()
         self.latest_bubble = None
 
         self.setStyleSheet(f"""
@@ -75,11 +84,14 @@ class GraceHUD(QMainWindow):
 
         main.addWidget(self._topbar())
 
+        self.api_pane = AnimatedSidePane()
+
         body = QHBoxLayout()
         body.setSpacing(10)
         body.addWidget(self._left_panel(),  0)
         body.addWidget(self._center_panel(), 1)
         body.addWidget(self._right_panel(), 0)
+        body.addWidget(self.api_pane, 0)
         main.addLayout(body, 1)
 
         main.addWidget(self._bottombar())
@@ -185,6 +197,8 @@ class GraceHUD(QMainWindow):
         nl.addWidget(self.metric_api_latency)
         self.metric_db_latency = TelemetryMetric("AWS DYNAMODB", "---ms", GREEN)
         nl.addWidget(self.metric_db_latency)
+        self.metric_pc_latency = TelemetryMetric("PINECONE DB", "---ms", CYAN)
+        nl.addWidget(self.metric_pc_latency)
         lay.addWidget(net_panel)
 
         lay.addStretch()
@@ -286,16 +300,45 @@ class GraceHUD(QMainWindow):
         lay2 = QVBoxLayout(tab2)
         lay2.setContentsMargins(12, 16, 12, 12)
         
-        lbl_info = GlowLabel("Deleting the context will erase the current session's chat history from DynamoDB.", TEXT_DIM, 9)
+        lbl_info = GlowLabel("Manage your Short-Term (DynamoDB) and Long-Term (Pinecone) memory independently.", TEXT_DIM, 9)
         lbl_info.setWordWrap(True)
         lay2.addWidget(lbl_info)
+        lay2.addSpacing(10)
         
-        self.btn_delete_context = CyberButton("DELETE CURRENT CONTEXT", PINK)
-        self.btn_delete_context.clicked.connect(self.sig_clear_context.emit)
-        lay2.addWidget(self.btn_delete_context)
+        self.btn_delete_dynamo = CyberButton("CLEAR DYNAMODB (SHORT-TERM)", AMBER)
+        self.btn_delete_dynamo.clicked.connect(self._prompt_clear_dynamo)
+        lay2.addWidget(self.btn_delete_dynamo)
+
+        self.btn_delete_pinecone = CyberButton("CLEAR PINECONE (LONG-TERM)", PINK)
+        self.btn_delete_pinecone.clicked.connect(self._prompt_clear_pinecone)
+        lay2.addWidget(self.btn_delete_pinecone)
+        
         lay2.addStretch()
         
         tabs.addTab(tab2, "CONTEXT")
+        
+        # Tab 3: DATABASES (Pinecone & DynamoDB)
+        tab3 = CyberPanel("◈ DATABASE METRICS", GREEN)
+        lay3 = QVBoxLayout(tab3)
+        lay3.setContentsMargins(12, 16, 12, 12)
+        lay3.setSpacing(10)
+        
+        h1 = QHBoxLayout()
+        self.metric_pc_vectors = TelemetryMetric("PINECONE MEMORIES", "---", CYAN)
+        self.metric_pc_full    = TelemetryMetric("INDEX FULLNESS", "---%", AMBER)
+        h1.addWidget(self.metric_pc_vectors)
+        h1.addWidget(self.metric_pc_full)
+        lay3.addLayout(h1)
+        
+        h2 = QHBoxLayout()
+        self.metric_dy_rcu = TelemetryMetric("DYNAMODB RCU", "---", PINK)
+        self.metric_dy_wcu = TelemetryMetric("DYNAMODB WCU", "---", PINK)
+        h2.addWidget(self.metric_dy_rcu)
+        h2.addWidget(self.metric_dy_wcu)
+        lay3.addLayout(h2)
+        
+        lay3.addStretch()
+        tabs.addTab(tab3, "DATABASES")
 
         return tabs
 
@@ -359,9 +402,14 @@ class GraceHUD(QMainWindow):
         
         self.btn_sleep    = CyberButton("SLEEP", CYAN)
         self.btn_train    = CyberButton("TRAIN VOICE", GREEN)
+        self.btn_api_quota = CyberButton("API QUOTA", AMBER)
         self.btn_shutdown = CyberButton("SHUTDOWN", PINK)
+        
+        self.btn_api_quota.clicked.connect(self.api_pane.toggle)
+        
         ac_lay.addWidget(self.btn_sleep)
         ac_lay.addWidget(self.btn_train)
+        ac_lay.addWidget(self.btn_api_quota)
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
 
@@ -408,12 +456,14 @@ class GraceHUD(QMainWindow):
         self.sig_state.connect(self._on_state)
         self.sig_message.connect(self._on_message)
         self.sig_attach_play.connect(self._on_attach_play)
+        self.sig_alert_toaster.connect(self.show_toaster)
         self.sig_metrics.connect(self._on_metrics)
         self.sig_latency.connect(self._on_latency)
         self.sig_wave.connect(self.audio_monitor.update_bars)
         self.sig_wave.connect(self.small_wave.update_bars)
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
+        self.sig_rag_stats.connect(self._on_rag_stats)
         self.btn_shutdown.clicked.connect(self.close)
         self.btn_train.clicked.connect(self._open_enrollment)
         self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)
@@ -509,20 +559,41 @@ class GraceHUD(QMainWindow):
         if state == "IDLE":
             self.lbl_input_state.setText("AWAITING INPUT...")
             self.lbl_input_state.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+            self.matrix_stream.set_speed("CALM")
+            self.matrix_stream.set_color(CYAN_DIM)
         elif state == "LISTENING":
             self.lbl_input_state.setText("LISTENING...")
             self.lbl_input_state.setStyleSheet(f"color: {GREEN}; background: transparent;")
+            self.matrix_stream.set_speed("FAST")
+            self.matrix_stream.set_color(CYAN_DIM)
         elif state == "PROCESSING":
             self.lbl_input_state.setText("THINKING...")
             self.lbl_input_state.setStyleSheet(f"color: {AMBER}; background: transparent;")
+            self.matrix_stream.set_speed("FAST")
+            self.matrix_stream.set_color(CYAN_DIM)
         elif state == "SPEAKING":
             self.lbl_input_state.setText("SPEAKING...")
             self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
+            self.matrix_stream.set_speed("FAST")
+            self.matrix_stream.set_color(PINK)
         elif state == "REJECTED":
             self.lbl_input_state.setText("UNKNOWN SPEAKER REJECTED")
             self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
+            self.matrix_stream.set_speed("CALM")
+            self.matrix_stream.set_color(PINK)
             
         self.timer_wave.setInterval(50 if state == "LISTENING" else 40 if state == "SPEAKING" else 80)
+        
+    def _on_rag_stats(self, stats: dict):
+        if "pinecone" in stats and stats["pinecone"]:
+            pc = stats["pinecone"]
+            self.metric_pc_vectors.set_value(str(pc.get("totalVectorCount", 0)))
+            self.metric_pc_full.set_value(f"{pc.get('indexFullness', 0) * 100:.1f}%")
+            self.metric_pc_latency.set_value(f"{pc.get('latencyMs', 0)}ms")
+        if "dynamo" in stats and stats["dynamo"]:
+            dy = stats["dynamo"]
+            self.metric_dy_rcu.set_value(f"{dy.get('rcu', 0):.1f}")
+            self.metric_dy_wcu.set_value(f"{dy.get('wcu', 0):.1f}")
 
     def _on_message(self, speaker: str, text: str, tools: list):
         if self.latest_bubble:
@@ -559,6 +630,8 @@ class GraceHUD(QMainWindow):
         if speaker == "YOU":
             self.query_count += 1
             self.lbl_queries.setText(str(self.query_count))
+            self.api_pane.update_usage(self.query_count)
+            self._save_quota()
             
         QTimer.singleShot(50, self._scroll_bottom)
 
@@ -588,6 +661,21 @@ class GraceHUD(QMainWindow):
         if self.latest_bubble:
             self.latest_bubble.add_play_button(callback)
 
+    def _prompt_clear_dynamo(self):
+        from PyQt6.QtWidgets import QDialog
+        dlg = DangerConfirmDialog("Are you sure you want to erase the current short-term session memory from DynamoDB? You will lose recent context.", self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.sig_clear_dynamo.emit()
+
+    def _prompt_clear_pinecone(self):
+        from PyQt6.QtWidgets import QDialog
+        dlg = DangerConfirmDialog("Are you sure you want to PERMANENTLY erase ALL long-term memories from Pinecone? This action CANNOT BE UNDONE.", self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.sig_clear_pinecone.emit()
+
+    def show_toaster(self, message):
+        self.toaster = ToasterMessage(message, self)
+
     def attach_play_button_to_latest(self, callback):
         self.sig_attach_play.emit(callback)
 
@@ -603,6 +691,32 @@ class GraceHUD(QMainWindow):
         if text:
             self.sig_text_input.emit(text)
             self.text_input.clear()
+
+    # ── QUOTA PERSISTENCE ─────────────────
+    def _load_quota(self) -> int:
+        try:
+            if os.path.exists("quota.json"):
+                with open("quota.json", "r") as f:
+                    data = json.load(f)
+                    # Reset if it's a new day!
+                    today = datetime.now(IST).strftime("%Y-%m-%d")
+                    if data.get("date") == today:
+                        return data.get("main_queries", 0)
+            return 0
+        except Exception:
+            return 0
+
+    def _save_quota(self):
+        try:
+            today = datetime.now(IST).strftime("%Y-%m-%d")
+            data = {
+                "date": today,
+                "main_queries": self.query_count
+            }
+            with open("quota.json", "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            print(f"Failed to save quota: {e}")
 
 
 # ──────────────────────────────────────────
