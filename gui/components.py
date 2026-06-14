@@ -830,9 +830,9 @@ class AnimatedSidePane(QWidget):
         p1_lay.addWidget(GlowLabel("Gemini 2.5 Flash Lite", TEXT_DIM, 8))
         p1_lay.addSpacing(10)
         
-        self.lbl_idx_usage = GlowLabel("TODAY: 0 / 20", CYAN, 11, True)
+        self.lbl_idx_usage = GlowLabel("UNINDEXED: 0 / 40", CYAN, 11, True)
         p1_lay.addWidget(self.lbl_idx_usage)
-        p1_lay.addWidget(GlowLabel("Limits: 15 RPM | 20 RPD | 250k TPM", TEXT_DIM, 8))
+        p1_lay.addWidget(GlowLabel("Fires background summarizer every 40 msgs", TEXT_DIM, 8))
         p1_lay.addStretch()
         self.carousel.addWidget(page1)
 
@@ -844,9 +844,9 @@ class AnimatedSidePane(QWidget):
         p2_lay.addWidget(GlowLabel("Gemini 3.1 Flash Lite", TEXT_DIM, 8))
         p2_lay.addSpacing(10)
         
-        self.lbl_main_usage = GlowLabel("TODAY: 0 / 500", CYAN, 11, True)
+        self.lbl_main_usage = GlowLabel("CONTEXT: 0 / 50", CYAN, 11, True)
         p2_lay.addWidget(self.lbl_main_usage)
-        p2_lay.addWidget(GlowLabel("Limits: 20 RPM | 500 RPD | 250k TPM", TEXT_DIM, 8))
+        p2_lay.addWidget(GlowLabel("Max short-term memory capacity", TEXT_DIM, 8))
         p2_lay.addStretch()
         self.carousel.addWidget(page2)
         
@@ -892,11 +892,12 @@ class AnimatedSidePane(QWidget):
         if curr < self.carousel.count() - 1:
             self.carousel.setCurrentIndex(curr + 1)
             
-    def update_usage(self, main_queries: int):
-        # We calculate the indexer runs natively! Since 40 messages = 1 run.
-        indexer_runs = main_queries // 40
-        self.lbl_main_usage.setText(f"TODAY: {main_queries} / 500")
-        self.lbl_idx_usage.setText(f"TODAY: {indexer_runs} / 20")
+    def update_usage(self, bubble_count: int):
+        self.lbl_main_usage.setText(f"CONTEXT: {bubble_count} / 50")
+        unindexed = bubble_count % 40
+        if bubble_count > 0 and bubble_count % 40 == 0:
+            unindexed = 40
+        self.lbl_idx_usage.setText(f"UNINDEXED: {unindexed} / 40")
 
 # ──────────────────────────────────────────
 # DANGER ZONE CONFIRMATION DIALOG

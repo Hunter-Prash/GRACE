@@ -75,10 +75,26 @@ Example:
                 }
             }
 
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: `${summarizationPrompt}\n\n[EXISTING KNOWLEDGE]\n${existingKnowledgeStr || "None."}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
-            });
+            let response;
+            let retries = 3;
+            while (retries > 0) {
+                try {
+                    response = await ai.models.generateContent({
+                        model: 'gemini-2.5-flash-lite',
+                        contents: `${summarizationPrompt}\n\n[EXISTING KNOWLEDGE]\n${existingKnowledgeStr || "None."}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
+                    });
+                    break;
+                } catch (err) {
+                    const is503 = err.status === 503 || (err.message && err.message.includes('503')) || (err.message && err.message.toLowerCase().includes('high demand'));
+                    if (is503 && retries > 1) {
+                        retries--;
+                        console.warn(`[Indexer] 503 High Demand detected. Retrying in ${4 - retries} seconds... (${retries} left)`);
+                        await sleep((4 - retries) * 2000);
+                    } else {
+                        throw err;
+                    }
+                }
+            }
 
             allSummarizedFacts.push(response.text);
         } catch (err) {

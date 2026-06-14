@@ -59,14 +59,10 @@ router.post('/chat', async (req, res) => {
             return res.status(400).json({ error: "Text is required" });
         }
 
-        console.log(`[POST /api/chat] User: ${text}`);
-
         const result = await processChat(sessionId, text);
 
-        // Save to DB asynchronously after responding
-        saveChatMessage(sessionId, text, result.text).catch(console.error);
-
-        console.log(`[POST /api/chat] Grace: ${result.text}`);
+        // Save to DB and check if it triggered the memory indexer
+        const indexerTriggered = await saveChatMessage(sessionId, text, result.text);
 
         res.json({
             text: result.text,
@@ -74,7 +70,8 @@ router.post('/chat', async (req, res) => {
             outputTokens: result.outputTokens,
             dbLatencyMs: result.dbLatencyMs,
             dbContextItemsCount: result.dbContextItemsCount,
-            toolsUsed: result.toolsUsed
+            toolsUsed: result.toolsUsed,
+            indexerTriggered: indexerTriggered
         });
 
     } catch (error) {

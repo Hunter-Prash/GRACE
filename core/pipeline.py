@@ -265,6 +265,9 @@ async def pipeline_async(hud):
                     if "dbContextItemsCount" in response:
                         hud.sig_context_saturation.emit(response["dbContextItemsCount"])
                     
+                    if response.get("indexerTriggered"):
+                        hud.sig_alert_toaster.emit("🧠 MEMORY INDEXER TRIGGERED 🧠\nCompiling 40-message context to Pinecone.")
+                    
                     hud.set_state(STATE_SPEAKING)
                     
                     from core.audio import stream_synthesize_and_play

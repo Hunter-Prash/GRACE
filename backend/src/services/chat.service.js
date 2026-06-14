@@ -87,7 +87,9 @@ export async function saveChatMessage(sessionId, userText, graceText) {
         if (unindexedCount >= 40) {
             console.log("[DB] 40 unindexed messages reached! Triggering emergency indexer...");
             triggerMemoryIndexer(sessionId).catch(console.error);
+            return true;
         }
+        return false;
 
     } catch (e) {
         console.warn(`WARNING: Could not save message: ${e.message}`);
@@ -112,26 +114,25 @@ export async function triggerMemoryIndexer(sessionId = "default") {
         // Run the Gemini Summarizer + LangChain job
         const chunksIndexed = await runMemoryIndexer(unindexedMessages);
         
-        // If successfully processed, mark them as indexed!
-        if (chunksIndexed > 0) {
-            history = history.map(msg => {
-                if (msg.isIndexed === false) {
-                    return { ...msg, isIndexed: true };
-                }
-                return msg;
-            });
+        // We MUST mark them as indexed even if chunksIndexed === 0
+        // Otherwise, it will enter an infinite loop of triggering every message!
+        history = history.map(msg => {
+            if (msg.isIndexed === false) {
+                return { ...msg, isIndexed: true };
+            }
+            return msg;
+        });
 
-            const putCommand = new PutCommand({
-                TableName: TABLE_NAME,
-                Item: {
-                    SessionId: sessionId,
-                    History: history,
-                    LastUpdated: response.Item.LastUpdated
-                }
-            });
-            await docClient.send(putCommand);
-            console.log(`[DB] Marked ${unindexedMessages.length} messages as isIndexed: true.`);
-        }
+        const putCommand = new PutCommand({
+            TableName: TABLE_NAME,
+            Item: {
+                SessionId: sessionId,
+                History: history,
+                LastUpdated: response.Item.LastUpdated
+            }
+        });
+        await docClient.send(putCommand);
+        console.log(`[DB] Marked ${unindexedMessages.length} messages as isIndexed: true. (Pinecone chunks: ${chunksIndexed})`);
     } catch (e) {
         console.error(`[DB] Indexer Trigger failed: ${e.message}`);
     }

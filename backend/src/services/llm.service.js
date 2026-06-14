@@ -6,6 +6,25 @@ import { updateDailyMetrics } from './metrics.service.js';
 import { openResource } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function safeSendMessage(chat, payload, maxRetries = 3) {
+    let attempt = 0;
+    while (attempt < maxRetries) {
+        try {
+            return await chat.sendMessage(payload);
+        } catch (error) {
+            attempt++;
+            const is503 = error.status === 503 || (error.message && error.message.includes('503')) || (error.message && error.message.toLowerCase().includes('high demand'));
+            if (is503 && attempt < maxRetries) {
+                console.warn(`[LLM] 503 High Demand detected. Retrying in ${attempt * 2} seconds... (Attempt ${attempt}/${maxRetries})`);
+                await sleep(attempt * 2000);
+            } else {
+                throw error;
+            }
+        }
+    }
+}
 
 let aiClient = null;
 
@@ -29,12 +48,15 @@ export async function processChat(sessionId, userText) {
 
     let memoryContextString = "";
     if (ragContext && ragContext.result && ragContext.result.hits) {
-        // Filter for relevant matches (score > 0.6)
-        const relevantHits = ragContext.result.hits.filter(h => h.score > 0.6);
+        // Lowered threshold: Pinecone's llama-text-embed-v2 often scores relevant hits around 0.2 - 0.3
+        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.15);
 
         if (relevantHits.length > 0) {
             memoryContextString = "\n\n## LONG-TERM MEMORY RECALL\nThe following facts have been retrieved from your long-term memory because they are mathematically relevant to the user's current message:\n"
-                + relevantHits.map(h => `- ${h.fields.chunk_text}`).join("\n");
+                + relevantHits.map(h => {
+                    const textContent = (h.fields && h.fields.text) || h.text || (h.fields && h.fields.chunk_text) || "";
+                    return `- ${textContent}`;
+                }).join("\n");
         }
     }
 
@@ -156,7 +178,7 @@ Filter every career-related response through this question: "How does this move 
         }
     });
 
-    let response = await chat.sendMessage({ message: userText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
+    let response = await safeSendMessage(chat, { message: userText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
 
     const toolsUsed = [];
 
@@ -223,7 +245,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         }
 
         // 4. Send  results BACK to Gemini in one single shot
-        response = await chat.sendMessage({ message: functionResponses });
+        response = await safeSendMessage(chat, { message: functionResponses });
     }
 
     let inputTokens = 0;

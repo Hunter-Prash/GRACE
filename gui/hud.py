@@ -35,8 +35,8 @@ class GraceHUD(QMainWindow):
         self.setWindowTitle("GRACE // CORE HUD")
         self.setMinimumSize(1100, 660)
         self.session_start = time.time()
-        self.query_count   = self._load_quota()
         self.latest_bubble = None
+        self.bubble_count  = 0
 
         self.setStyleSheet(f"""
             QMainWindow, QWidget#central_widget {{
@@ -627,11 +627,10 @@ class GraceHUD(QMainWindow):
             
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, row)
         
-        if speaker == "YOU":
-            self.query_count += 1
-            self.lbl_queries.setText(str(self.query_count))
-            self.api_pane.update_usage(self.query_count)
-            self._save_quota()
+        if speaker == "YOU" or speaker == "GRACE":
+            self.bubble_count += 1
+            self.lbl_queries.setText(str(self.bubble_count))
+            self.api_pane.update_usage(self.bubble_count)
             
         QTimer.singleShot(50, self._scroll_bottom)
 
@@ -640,12 +639,15 @@ class GraceHUD(QMainWindow):
         sb.setValue(sb.maximum())
 
     def clear_chat_ui(self):
-        # Clear all child widgets from chat_layout except the stretch
-        while self.chat_layout.count() > 1:
+        while self.chat_layout.count():
             item = self.chat_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
         self.latest_bubble = None
+        self.bubble_count = 0
+        self.lbl_queries.setText("0")
+        self.api_pane.update_usage(0)
 
     # ── THREAD-SAFE SETTERS ───────────────
     def set_state(self, state: str):
@@ -691,32 +693,6 @@ class GraceHUD(QMainWindow):
         if text:
             self.sig_text_input.emit(text)
             self.text_input.clear()
-
-    # ── QUOTA PERSISTENCE ─────────────────
-    def _load_quota(self) -> int:
-        try:
-            if os.path.exists("quota.json"):
-                with open("quota.json", "r") as f:
-                    data = json.load(f)
-                    # Reset if it's a new day!
-                    today = datetime.now(IST).strftime("%Y-%m-%d")
-                    if data.get("date") == today:
-                        return data.get("main_queries", 0)
-            return 0
-        except Exception:
-            return 0
-
-    def _save_quota(self):
-        try:
-            today = datetime.now(IST).strftime("%Y-%m-%d")
-            data = {
-                "date": today,
-                "main_queries": self.query_count
-            }
-            with open("quota.json", "w") as f:
-                json.dump(data, f)
-        except Exception as e:
-            print(f"Failed to save quota: {e}")
 
 
 # ──────────────────────────────────────────
