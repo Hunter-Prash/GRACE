@@ -1,8 +1,12 @@
 import sys
 import threading
+import os
+from dotenv import load_dotenv
 from PyQt6.QtWidgets import QApplication
 from gui.hud import GraceHUD
 from core.pipeline import run_pipeline, latency_monitor_thread, rag_monitor_thread
+
+load_dotenv(os.path.join("backend", ".env"))
 
 def main():
     app = QApplication(sys.argv)

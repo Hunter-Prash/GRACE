@@ -44,17 +44,10 @@ export const runMemoryIndexer = async (unindexedConversations) => {
     const todayIST = getISTTimestamp().split('T')[0];
     const summarizationPrompt = `
 You are a memory archivist for Grace, a Life OS. 
-Extract a bulleted list of only the concrete facts, life events, decisions, and preferences from the NEW TRANSCRIPT.
+Write a comprehensive, dense paragraph summarizing all the concrete facts, life events, decisions, and preferences from the NEW TRANSCRIPT.
 Completely ignore small talk, greetings, filler words, and routine task outputs. 
-Keep it concise and highly factual.
-
-*** DEDUPLICATION RULES ***
-1. If a fact in the NEW TRANSCRIPT means the exact same thing as a fact in the [EXISTING KNOWLEDGE] block, IGNORE IT. Do not extract it.
-2. If a fact in the NEW TRANSCRIPT contradicts the [EXISTING KNOWLEDGE] (e.g. user changed their mind), DO EXTRACT IT so we can record the state change.
-
-CRITICAL INSTRUCTION: You MUST prefix every single bullet point with the exact date: [${todayIST}].
-Example: 
-- [${todayIST}] Prashant decided to focus on Go instead of Java.
+Do NOT use bullet points. Write a continuous narrative summary.
+CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if recording new events.
     `;
 
     for (let i = 0; i < rawBatches.length; i++) {
@@ -65,23 +58,13 @@ Example:
 
         console.log(`[Indexer] Sending Batch ${i + 1} to gemini-2.5-flash-lite for summarization...`);
         try {
-            console.log(`[Indexer] Searching Pinecone for existing context...`);
-            const pineconeRes = await getEmbedding(rawBatches[i], 15);
-            let existingKnowledgeStr = "";
-            if (pineconeRes && pineconeRes.result && pineconeRes.result.hits) {
-                const hits = pineconeRes.result.hits.filter(h => h.score > 0.3); // Filter out absolute junk
-                if (hits.length > 0) {
-                    existingKnowledgeStr = hits.map(h => `- ${h.fields.text || h.fields.chunk_text}`).join("\n");
-                }
-            }
-
             let response;
             let retries = 3;
             while (retries > 0) {
                 try {
                     response = await ai.models.generateContent({
                         model: 'gemini-2.5-flash-lite',
-                        contents: `${summarizationPrompt}\n\n[EXISTING KNOWLEDGE]\n${existingKnowledgeStr || "None."}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
+                        contents: `${summarizationPrompt}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
                     });
                     break;
                 } catch (err) {
@@ -109,24 +92,51 @@ Example:
     }
 
     // 4. Chunking the CLEAN data with LangChain
-    console.log("[Indexer] Feeding clean facts into LangChain Text Splitter...");
+    console.log("[Indexer] Feeding clean summary into LangChain Text Splitter...");
     const splitter = new RecursiveCharacterTextSplitter({
         chunkSize: 400,
         chunkOverlap: 50,
     });
 
     const documents = await splitter.createDocuments([finalSummaryString]);
-    console.log(`[Indexer] LangChain chopped the facts into ${documents.length} optimal vectors.`);
+    console.log(`[Indexer] LangChain chopped the summary into ${documents.length} vectors. Starting Deduplication...`);
 
-    // 5. Upsert to Pinecone Integrated Embeddings
-    const pineconeRecords = documents.map((doc, index) => ({
-        _id: `chat-memory-${Date.now()}-${index}`,
-        text: doc.pageContent,
-        category: "chat_history"
-    }));
+    // 5. Deduplicate and Upsert
+    const newPineconeRecords = [];
+    
+    for (let idx = 0; idx < documents.length; idx++) {
+        const doc = documents[idx];
+        const pineconeRes = await getEmbedding(doc.pageContent, 1);
+        
+        let isDuplicate = false;
+        if (pineconeRes && pineconeRes.result && pineconeRes.result.hits && pineconeRes.result.hits.length > 0) {
+            // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.20 threshold as requested.
+            const score = pineconeRes.result.hits[0].score || pineconeRes.result.hits[0]._score;
+            if (score > 0.20) {
+                isDuplicate = true;
+                console.log(`[Indexer] Chunk ${idx + 1} is a duplicate (score: ${score.toFixed(3)}). Dropping.`);
+            }
+        }
 
-    await upsertQuery(pineconeRecords);
-    console.log("[Indexer] Successfully vectorized and stored pure, high-signal memories in Pinecone!");
+        if (!isDuplicate) {
+            newPineconeRecords.push({
+                _id: `chat-memory-${Date.now()}-${idx}`,
+                text: doc.pageContent,
+                category: "chat_history"
+            });
+            console.log(`[Indexer] Chunk ${idx + 1} is NEW. Queuing for upsert.`);
+        }
+        
+        // Small sleep to respect Pinecone embedding API limits if many chunks
+        await sleep(500); 
+    }
 
-    return pineconeRecords.length;
+    if (newPineconeRecords.length > 0) {
+        await upsertQuery(newPineconeRecords);
+        console.log(`[Indexer] Successfully vectorized and stored ${newPineconeRecords.length} NEW high-signal memories in Pinecone!`);
+    } else {
+        console.log("[Indexer] All chunks were duplicates. Nothing new to store.");
+    }
+
+    return newPineconeRecords.length;
 }

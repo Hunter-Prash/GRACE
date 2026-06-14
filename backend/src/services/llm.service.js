@@ -5,6 +5,7 @@ import { createGoal, updateMilestone, getActiveGoals } from './goals.service.js'
 import { updateDailyMetrics } from './metrics.service.js';
 import { openResource } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
+import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -72,6 +73,7 @@ Scale every response to match the weight of the input. Do not violate this:
 Never pad responses. Never repeat yourself. Say exactly what needs to be said, nothing more.
 
 ## WHO PRASHANT IS
+- **Location:** His home address is Zolo Mirage, Siruseri (Exact GPS: 12.8422,80.2223). His office is TCS Siruseri (Exact GPS: 12.8234,80.2120). When calling map tools for his home or office, you MUST pass the Exact GPS coordinates directly instead of the text strings. If he asks for a commute without specifying an origin, default to his home GPS.
 - **Career:** Software Engineer at TCS in Chennai, working on a Stibo STEP MDM project for Walgreens. Background in Java/OOP, Spring Boot, JPA/Hibernate, PostgreSQL, and React/TypeScript. His singular career goal is to transition into a **Development Engineering role at a Big Tech firm** (Google, Meta, Amazon, etc.). Do NOT frame advice through an SRE lens. His goal is Dev Engineering.
 - **Learning Style:** Cumulative, not daily. He prefers monthly LeetCode summaries over daily streaks. He needs momentum and big-picture framing, not micro-management.
 - **Personality:** Direct, honest, a bit stubborn. He will push back if something doesn't feel right. He hates hollow reassurance. He is a gamer (Xbox, Steam). He takes cold showers. He works hard but is also human.
@@ -163,6 +165,29 @@ Filter every career-related response through this question: "How does this move 
                     type: "OBJECT",
                     properties: {} // No parameters needed
                 }
+            },
+            {
+                name: "getCommuteTime",
+                description: "Gets the live ETA, drive time, and exact distance between any two locations or cities. MUST call this whenever the user asks for the distance, route, or commute time between places.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        origin: { type: "STRING", description: "The starting address or landmark" },
+                        destination: { type: "STRING", description: "The destination address or landmark" }
+                    },
+                    required: ["origin", "destination"]
+                }
+            },
+            {
+                name: "getNearbyPlaces",
+                description: "Searches for nearby places like cafes, gyms, or restaurants based on a text query.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        query: { type: "STRING", description: "What to search for, e.g., 'gyms near HITEC City', 'best coffee shops'" }
+                    },
+                    required: ["query"]
+                }
             }
         ]
     }];
@@ -181,6 +206,7 @@ Filter every career-related response through this question: "How does this move 
     let response = await safeSendMessage(chat, { message: userText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
 
     const toolsUsed = [];
+    let mapData = null;
 
 
 
@@ -230,6 +256,22 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const goals = await getActiveGoals();
                     toolResult = { success: true, activeGoals: goals };
                 }
+                else if (call.name === 'getCommuteTime') {
+                    const args = call.args;
+                    const res = await getCommuteTime(args.origin, args.destination);
+                    if (res) {
+                        toolResult = { success: true, eta: res.eta, distance: res.distance };
+                        mapData = { type: 'route', originCoords: res.originCoords, destCoords: res.destCoords };
+                    } else {
+                        toolResult = { success: true, eta: "Could not find route" };
+                    }
+                }
+                else if (call.name === 'getNearbyPlaces') {
+                    const args = call.args;
+                    const places = await getNearbyPlaces(args.query);
+                    toolResult = { success: true, places: places };
+                    mapData = { type: 'places', query: args.query, places: places };
+                }
             } catch (e) {
                 console.error(`Tool execution failed: ${e.message}`);
                 toolResult = { success: false, error: e.message };
@@ -262,6 +304,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         outputTokens,
         dbLatencyMs,
         dbContextItemsCount,
-        toolsUsed
+        toolsUsed,
+        mapData
     };
 }

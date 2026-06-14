@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, DangerConfirmDialog, ToasterMessage
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -29,6 +29,7 @@ class GraceHUD(QMainWindow):
     sig_force_sleep = pyqtSignal()
     sig_alert_toaster = pyqtSignal(str)
     sig_clear_context = pyqtSignal()
+    sig_map_update  = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -85,6 +86,16 @@ class GraceHUD(QMainWindow):
         main.addWidget(self._topbar())
 
         self.api_pane = AnimatedSidePane()
+        self.map_pane = AnimatedMapPane()
+        
+        self.map_tab = MapToggleTab()
+        self.map_tab.clicked.connect(self._on_map_tab_clicked)
+        
+        # Center the tab vertically in its own little layout
+        tab_lay = QVBoxLayout()
+        tab_lay.addStretch()
+        tab_lay.addWidget(self.map_tab)
+        tab_lay.addStretch()
 
         body = QHBoxLayout()
         body.setSpacing(10)
@@ -92,6 +103,8 @@ class GraceHUD(QMainWindow):
         body.addWidget(self._center_panel(), 1)
         body.addWidget(self._right_panel(), 0)
         body.addWidget(self.api_pane, 0)
+        body.addWidget(self.map_pane, 0)
+        body.addLayout(tab_lay, 0)
         main.addLayout(body, 1)
 
         main.addWidget(self._bottombar())
@@ -461,6 +474,8 @@ class GraceHUD(QMainWindow):
         self.sig_latency.connect(self._on_latency)
         self.sig_wave.connect(self.audio_monitor.update_bars)
         self.sig_wave.connect(self.small_wave.update_bars)
+        self.sig_map_update.connect(self.map_pane.process_map_data)
+        self.map_pane.sig_data_ready.connect(lambda: self.map_tab.set_glow(True))
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
         self.sig_rag_stats.connect(self._on_rag_stats)
@@ -468,6 +483,13 @@ class GraceHUD(QMainWindow):
         self.btn_train.clicked.connect(self._open_enrollment)
         self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)
         
+    def _on_map_tab_clicked(self):
+        if self.map_pane.is_open:
+            self.map_pane.slide_out()
+        else:
+            self.map_tab.set_glow(False)
+            self.map_pane.slide_in()
+
     def _open_enrollment(self):
         self.is_enrolling = True
         dialog = VoiceEnrollmentDialog(self)
@@ -605,7 +627,7 @@ class GraceHUD(QMainWindow):
 
         if tools:
             tools_str = ", ".join(tools)
-            badge_html = f"<br><br><span style='color: #888888; font-size: 10px;'><i>🛠️ Tools: {tools_str}</i></span>"
+            badge_html = f"<br><br><span style='color: gray; font-size: 10px;'><i>🛠️ Tools: {tools_str}</i></span>"
             text += badge_html
 
         bubble = ChatBubble(speaker, text)

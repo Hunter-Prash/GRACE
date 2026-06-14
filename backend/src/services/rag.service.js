@@ -13,11 +13,7 @@ export const seedInitialMemory = async () => {
             text: "Grace is a Life Support System and personal companion for Prashant. She is building a long-term relationship with him.",
             category: "system"
         },
-        {
-            _id: "prashant-career-1",
-            text: "Prashant is a Software Engineer at TCS in Chennai, working on a Stibo STEP MDM project for Walgreens. His background is in Java/OOP, Spring Boot, JPA/Hibernate, PostgreSQL, and React/TypeScript.",
-            category: "system"
-        },
+
         {
             _id: "prashant-goals-1",
             text: "Prashant's singular career goal is to transition into a Development Engineering role at a Big Tech firm (Google, Meta, Amazon, etc.).",
