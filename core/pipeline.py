@@ -11,6 +11,8 @@ from core.audio import (
     mic_callback, speaker_callback, mic_queue, oww_model,
     run_live_vad_session, synthesize_speech, play_audio_sync, play_audio_with_interruption, init_audio_models
 )
+from core.biometrics import init_biometrics, verify_speaker, has_voice_profile
+from collections import deque
 
 def latency_monitor_thread(hud):
     """Background thread to measure latency to Google Gemini API servers every 10 seconds."""
@@ -26,8 +28,24 @@ def latency_monitor_thread(hud):
             hud.sig_latency.emit("OFFLINE")
         time.sleep(10)
 
+def rag_monitor_thread(hud):
+    """Background thread to fetch RAG and DB stats from the backend every 15 seconds."""
+    while True:
+        try:
+            resp = requests.get("http://localhost:3000/api/rag/stats", timeout=3.0)
+            if resp.status_code == 200:
+                hud.sig_rag_stats.emit(resp.json())
+        except Exception:
+            pass
+        time.sleep(15)
+
 async def pipeline_async(hud):
     init_audio_models()
+    try:
+        init_biometrics()
+    except Exception as e:
+        print(f"Failed to initialize biometrics: {e}")
+        
     from core.audio import oww_model
 
     audio = pyaudio.PyAudio()
@@ -75,6 +93,8 @@ async def pipeline_async(hud):
     active_session = False
     session_input_tokens = 0
     session_output_tokens = 0
+    rate_limit_tracker = deque()
+    last_toaster_time = 0
     mic_stream.start_stream()
     spk_stream.start_stream()
     hud.set_state(STATE_IDLE)
@@ -82,9 +102,21 @@ async def pipeline_async(hud):
     from PyQt6.QtCore import Qt
     text_input_queue = queue.Queue()
     hud.sig_text_input.connect(lambda t: text_input_queue.put(t), type=Qt.ConnectionType.DirectConnection)
+    
+    cmd_queue = queue.Queue()
+    hud.sig_force_sleep.connect(lambda: cmd_queue.put("SLEEP"), type=Qt.ConnectionType.DirectConnection)
+    hud.sig_clear_dynamo.connect(lambda: cmd_queue.put("CLEAR_DYNAMO"), type=Qt.ConnectionType.DirectConnection)
+    hud.sig_clear_pinecone.connect(lambda: cmd_queue.put("CLEAR_PINECONE"), type=Qt.ConnectionType.DirectConnection)
+    
+    # 3-second rolling buffer for speaker verification (approx 40 chunks if 1280 chunk_size)
+    audio_buffer = deque(maxlen=40)
 
     try:
         while True:
+            if getattr(hud, "is_enrolling", False):
+                await asyncio.sleep(0.1)
+                continue
+
             user_cmd = None
             is_text_cmd = False
 
@@ -94,14 +126,69 @@ async def pipeline_async(hud):
                 is_text_cmd = True
             except queue.Empty:
                 pass
+                
+            try:
+                sys_cmd = cmd_queue.get_nowait()
+                if sys_cmd == "SLEEP":
+                    active_session = False
+                    hud.set_state(STATE_IDLE)
+                    audio_buffer.clear()
+                    with mic_queue.mutex:
+                        mic_queue.queue.clear()
+                    hud.add_message("GRACE", "System going to sleep. Say the wake word to activate.")
+                    continue
+                elif sys_cmd == "CLEAR_DYNAMO":
+                    try:
+                        resp = requests.delete("http://localhost:3000/api/history/default", timeout=5)
+                        if resp.status_code == 200:
+                            hud.clear_chat_ui()
+                            hud.add_message("GRACE", "DynamoDB Short-Term Context erased. Starting fresh.")
+                            hud.sig_context_saturation.emit(0)
+                        else:
+                            hud.add_message("GRACE", "Failed to clear DynamoDB context.")
+                    except Exception as e:
+                        hud.add_message("GRACE", f"Error connecting to backend: {e}")
+                    continue
+                elif sys_cmd == "CLEAR_PINECONE":
+                    try:
+                        resp = requests.delete("http://localhost:3000/api/pinecone", timeout=5)
+                        if resp.status_code == 200:
+                            hud.add_message("GRACE", "Pinecone Long-Term Context completely wiped.")
+                        else:
+                            hud.add_message("GRACE", "Failed to clear Pinecone memory.")
+                    except Exception as e:
+                        hud.add_message("GRACE", f"Error connecting to backend: {e}")
+                    continue
+            except queue.Empty:
+                pass
 
             if not active_session:
                 try:
                     data = mic_queue.get(timeout=0.1)
                     pcm  = np.frombuffer(data, dtype=np.int16)
+                    audio_buffer.append(pcm)
+                    
                     pred = oww_model.predict(pcm)
                     if pred['hey_mycroft'] > 0.75:
-                        active_session = True
+                        if has_voice_profile():
+                            # Reconstruct the last ~3 seconds of audio to verify who said the wake word
+                            verification_data = np.concatenate(list(audio_buffer))
+                            is_match, score = verify_speaker(verification_data)
+                            if is_match:
+                                active_session = True
+                            else:
+                                print(f"[!] WAKE WORD REJECTED. Unknown Speaker (Score: {score:.3f})")
+                                hud.set_state("REJECTED")
+                                audio_buffer.clear()
+                                # Pause slightly before returning to IDLE
+                                await asyncio.sleep(1.5)
+                                hud.set_state(STATE_IDLE)
+                        else:
+                            active_session = True
+                            
+                        if active_session:
+                            audio_buffer.clear()
+                            
                 except queue.Empty:
                     continue
 
@@ -147,14 +234,30 @@ async def pipeline_async(hud):
                     if "error" in response:
                         raise Exception(response["error"])
 
+                    tools_used = response.get("toolsUsed", [])
                     text_answer = response.get("text", "").strip()
-                    hud.add_message("GRACE", text_answer)
+                    hud.add_message("GRACE", text_answer, tools=tools_used)
                     
                     # Track metrics and costs
-                    session_input_tokens += response.get("inputTokens", 0)
-                    session_output_tokens += response.get("outputTokens", 0)
+                    req_in = response.get("inputTokens", 0)
+                    req_out = response.get("outputTokens", 0)
+                    session_input_tokens += req_in
+                    session_output_tokens += req_out
                     total_cost = (session_input_tokens * 0.075 / 1000000) + (session_output_tokens * 0.30 / 1000000)
                     hud.sig_metrics.emit(session_input_tokens + session_output_tokens, total_cost)
+                    
+                    # Rate Limit Sliding Window Tracker
+                    curr_time = time.time()
+                    rate_limit_tracker.append((curr_time, req_in + req_out))
+                    while rate_limit_tracker and curr_time - rate_limit_tracker[0][0] > 60:
+                        rate_limit_tracker.popleft()
+                    
+                    rpm = len(rate_limit_tracker)
+                    tpm = sum(t for _, t in rate_limit_tracker)
+                    if rpm >= 12 or tpm >= 200000:
+                        if curr_time - last_toaster_time > 10:
+                            hud.sig_alert_toaster.emit(f"⚠️ 80% RATE LIMIT REACHED ⚠️\n{rpm}/15 RPM | {tpm:,}/250K TPM")
+                            last_toaster_time = curr_time
                     
                     # Track new telemetry
                     if "dbLatencyMs" in response:
@@ -162,15 +265,18 @@ async def pipeline_async(hud):
                     if "dbContextItemsCount" in response:
                         hud.sig_context_saturation.emit(response["dbContextItemsCount"])
                     
-                    hud.set_state(STATE_SPEAKING)
-                    audio_bytes  = await synthesize_speech(text_answer)
+                    if response.get("indexerTriggered"):
+                        hud.sig_alert_toaster.emit("🧠 MEMORY INDEXER TRIGGERED 🧠\nCompiling 40-message context to Pinecone.")
                     
-                    # Attach play button trigger to the latest bubble
+                    hud.set_state(STATE_SPEAKING)
+                    
+                    from core.audio import stream_synthesize_and_play
+                    interrupted, audio_bytes = await stream_synthesize_and_play(text_answer, hud)
+                    
+                    # Attach play button trigger to the latest bubble after it finishes generating
                     hud.attach_play_button_to_latest(lambda checked=False, ab=audio_bytes: threading.Thread(
                         target=play_audio_sync, args=(ab, hud), daemon=True
                     ).start())
-                    
-                    interrupted  = await play_audio_with_interruption(audio_bytes)
 
                     if not interrupted:
                         await asyncio.sleep(0.5)

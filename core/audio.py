@@ -2,8 +2,10 @@ import io
 import math
 import queue
 import asyncio
+import threading
 import pyaudio
 import numpy as np
+import re
 from kokoro import KPipeline
 from faster_whisper import WhisperModel
 from openwakeword.model import Model
@@ -48,8 +50,9 @@ def speaker_callback(in_data, frame_count, time_info, status):
 async def synthesize_speech(text: str) -> bytes:
     """Synthesize speech using Kokoro TTS running locally on GPU."""
     def _run_kokoro():
+        clean_text = re.sub(r'[*`~_#]', '', text)
         all_audio = []
-        generator = kokoro_pipeline(text, voice=KOKORO_VOICE, speed=1.0, split_pattern=r'[.!?]+')
+        generator = kokoro_pipeline(clean_text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
         for _, _, audio in generator:
             if audio is not None and len(audio) > 0:
                 all_audio.append(audio)
@@ -61,6 +64,61 @@ async def synthesize_speech(text: str) -> bytes:
     # Kokoro outputs float32 at 24kHz — convert to int16 PCM for pyaudio
     audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
     return audio_int16.tobytes()
+
+async def stream_synthesize_and_play(text: str, hud) -> tuple[bool, bytes]:
+    """Stream TTS generation directly to speaker_queue and monitor for interruptions."""
+    with speaker_queue.mutex:
+        speaker_queue.queue.clear()
+        
+    is_generating = [True]
+    interrupted = [False]
+    all_bytes = []
+    
+    def _run_kokoro():
+        try:
+            clean_text = re.sub(r'[*`~_#]', '', text)
+            generator = kokoro_pipeline(clean_text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
+            for _, _, audio in generator:
+                if interrupted[0]:
+                    break
+                if audio is not None and len(audio) > 0:
+                    # Convert PyTorch tensor to NumPy array
+                    if hasattr(audio, "cpu"):
+                        audio_np = audio.cpu().numpy()
+                    else:
+                        audio_np = np.array(audio)
+                        
+                    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+                    audio_bytes = audio_int16.tobytes()
+                    all_bytes.append(audio_bytes)
+                    chunk_len = CHUNK_SIZE * 2
+                    for i in range(0, len(audio_bytes), chunk_len):
+                        speaker_queue.put(audio_bytes[i:i+chunk_len])
+        finally:
+            is_generating[0] = False
+
+    # Start generator thread
+    kokoro_thread = threading.Thread(target=_run_kokoro, daemon=True)
+    kokoro_thread.start()
+    
+    hud.set_state(STATE_SPEAKING)
+    
+    # Wait for completion while checking for interruptions
+    while is_generating[0] or not speaker_queue.empty():
+        try:
+            mic_data = mic_queue.get_nowait()
+            pcm = np.frombuffer(mic_data, dtype=np.int16)
+            vol = math.sqrt(sum(int(x)**2 for x in pcm) / max(len(pcm), 1))
+            if vol >= SILENCE_THRESHOLD + 150:
+                interrupted[0] = True
+                with speaker_queue.mutex:
+                    speaker_queue.queue.clear()
+                break
+        except queue.Empty:
+            pass
+        await asyncio.sleep(0.01)
+        
+    return interrupted[0], b''.join(all_bytes)
 
 def run_live_vad_session(hud):
     with mic_queue.mutex:

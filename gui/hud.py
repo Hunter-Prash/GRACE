@@ -1,30 +1,42 @@
 import time
 import math
 import psutil
+import json
+import os
+from datetime import datetime, timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy, QTabWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, DangerConfirmDialog, ToasterMessage
+from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
     sig_state   = pyqtSignal(str)
-    sig_message = pyqtSignal(str, str)
+    sig_message = pyqtSignal(str, str, list)
     sig_wave    = pyqtSignal(list)
     sig_attach_play = pyqtSignal(object)
     sig_metrics     = pyqtSignal(int, float)
     sig_latency     = pyqtSignal(str)
     sig_text_input  = pyqtSignal(str)
+    sig_clear_dynamo = pyqtSignal()
+    sig_clear_pinecone = pyqtSignal()
     sig_db_latency  = pyqtSignal(int)
     sig_context_saturation = pyqtSignal(int)
+    sig_rag_stats   = pyqtSignal(dict)
+    sig_force_sleep = pyqtSignal()
+    sig_alert_toaster = pyqtSignal(str)
+    sig_clear_context = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GRACE // CORE HUD")
         self.setMinimumSize(1100, 660)
         self.session_start = time.time()
-        self.query_count   = 0
         self.latest_bubble = None
+        self.bubble_count  = 0
 
         self.setStyleSheet(f"""
             QMainWindow, QWidget#central_widget {{
@@ -72,11 +84,14 @@ class GraceHUD(QMainWindow):
 
         main.addWidget(self._topbar())
 
+        self.api_pane = AnimatedSidePane()
+
         body = QHBoxLayout()
         body.setSpacing(10)
         body.addWidget(self._left_panel(),  0)
         body.addWidget(self._center_panel(), 1)
         body.addWidget(self._right_panel(), 0)
+        body.addWidget(self.api_pane, 0)
         main.addLayout(body, 1)
 
         main.addWidget(self._bottombar())
@@ -106,19 +121,22 @@ class GraceHUD(QMainWindow):
 
         lay.addStretch()
 
-        # Right Indicator Dots
+        # Right Indicator Dots (pulsing animated)
         lights = QWidget()
         lights_lay = QHBoxLayout(lights)
         lights_lay.setContentsMargins(10, 0, 0, 0)
-        lights_lay.setSpacing(6)
-        
-        for i, color in enumerate([GREEN, CYAN, CYAN]):
-            dot = QLabel()
-            shade = color if i == 0 else "#00d4ff33"
-            dot.setFixedSize(8, 8)
-            dot.setStyleSheet(f"background: {shade}; border-radius: 4px;")
+        lights_lay.setSpacing(2)
+
+        # Green = system online, two dim cyan = secondary systems
+        dot_online = PulsingDot(GREEN, 7)
+        dot_net    = PulsingDot(CYAN,  6)
+        dot_ai     = PulsingDot(CYAN,  6)
+        # Offset phases so they don't pulse in sync
+        dot_net._phase = 1.0
+        dot_ai._phase  = 2.1
+        for dot in (dot_online, dot_net, dot_ai):
             lights_lay.addWidget(dot)
-            
+
         lay.addWidget(lights)
 
         div = QFrame()
@@ -179,12 +197,44 @@ class GraceHUD(QMainWindow):
         nl.addWidget(self.metric_api_latency)
         self.metric_db_latency = TelemetryMetric("AWS DYNAMODB", "---ms", GREEN)
         nl.addWidget(self.metric_db_latency)
+        self.metric_pc_latency = TelemetryMetric("PINECONE DB", "---ms", CYAN)
+        nl.addWidget(self.metric_pc_latency)
         lay.addWidget(net_panel)
 
         lay.addStretch()
         return w
 
     def _center_panel(self):
+        tabs = QTabWidget()
+        tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background: transparent;
+            }}
+            QTabBar::tab {{
+                background: {BG2};
+                color: {CYAN_DIM};
+                border: 1px solid {BORDER};
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 6px 12px;
+                font-family: Consolas, monospace;
+                font-size: 10px;
+                letter-spacing: 1px;
+            }}
+            QTabBar::tab:selected {{
+                background: transparent;
+                color: {CYAN};
+                border: 1px solid {CYAN};
+                border-bottom: none;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: rgba(0, 212, 255, 0.1);
+            }}
+        """)
+        
+        # Tab 1: CONVERSATION LOG
         panel = CyberPanel("◈ CONVERSATION LOG", CYAN)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(12, 16, 12, 12)
@@ -243,7 +293,54 @@ class GraceHUD(QMainWindow):
         
         lay.addWidget(bottom_row)
 
-        return panel
+        tabs.addTab(panel, "LOG")
+        
+        # Tab 2: MANAGE CONVERSATION HISTORY
+        tab2 = CyberPanel("◈ MANAGE CONTEXT", PINK)
+        lay2 = QVBoxLayout(tab2)
+        lay2.setContentsMargins(12, 16, 12, 12)
+        
+        lbl_info = GlowLabel("Manage your Short-Term (DynamoDB) and Long-Term (Pinecone) memory independently.", TEXT_DIM, 9)
+        lbl_info.setWordWrap(True)
+        lay2.addWidget(lbl_info)
+        lay2.addSpacing(10)
+        
+        self.btn_delete_dynamo = CyberButton("CLEAR DYNAMODB (SHORT-TERM)", AMBER)
+        self.btn_delete_dynamo.clicked.connect(self._prompt_clear_dynamo)
+        lay2.addWidget(self.btn_delete_dynamo)
+
+        self.btn_delete_pinecone = CyberButton("CLEAR PINECONE (LONG-TERM)", PINK)
+        self.btn_delete_pinecone.clicked.connect(self._prompt_clear_pinecone)
+        lay2.addWidget(self.btn_delete_pinecone)
+        
+        lay2.addStretch()
+        
+        tabs.addTab(tab2, "CONTEXT")
+        
+        # Tab 3: DATABASES (Pinecone & DynamoDB)
+        tab3 = CyberPanel("◈ DATABASE METRICS", GREEN)
+        lay3 = QVBoxLayout(tab3)
+        lay3.setContentsMargins(12, 16, 12, 12)
+        lay3.setSpacing(10)
+        
+        h1 = QHBoxLayout()
+        self.metric_pc_vectors = TelemetryMetric("PINECONE MEMORIES", "---", CYAN)
+        self.metric_pc_full    = TelemetryMetric("INDEX FULLNESS", "---%", AMBER)
+        h1.addWidget(self.metric_pc_vectors)
+        h1.addWidget(self.metric_pc_full)
+        lay3.addLayout(h1)
+        
+        h2 = QHBoxLayout()
+        self.metric_dy_rcu = TelemetryMetric("DYNAMODB RCU", "---", PINK)
+        self.metric_dy_wcu = TelemetryMetric("DYNAMODB WCU", "---", PINK)
+        h2.addWidget(self.metric_dy_rcu)
+        h2.addWidget(self.metric_dy_wcu)
+        lay3.addLayout(h2)
+        
+        lay3.addStretch()
+        tabs.addTab(tab3, "DATABASES")
+
+        return tabs
 
     def _right_panel(self):
         w = QWidget()
@@ -304,10 +401,26 @@ class GraceHUD(QMainWindow):
         ac_lay.setSpacing(6)
         
         self.btn_sleep    = CyberButton("SLEEP", CYAN)
+        self.btn_train    = CyberButton("TRAIN VOICE", GREEN)
+        self.btn_api_quota = CyberButton("API QUOTA", AMBER)
         self.btn_shutdown = CyberButton("SHUTDOWN", PINK)
+        
+        self.btn_api_quota.clicked.connect(self.api_pane.toggle)
+        
         ac_lay.addWidget(self.btn_sleep)
+        ac_lay.addWidget(self.btn_train)
+        ac_lay.addWidget(self.btn_api_quota)
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
+
+        # Matrix Data Stream
+        stream_panel = CyberPanel("◈ RAW DATA STREAM", CYAN)
+        stream_lay = QVBoxLayout(stream_panel)
+        stream_lay.setContentsMargins(12, 16, 12, 12)
+        self.matrix_stream = HexMatrixStream(CYAN_DIM)
+        self.matrix_stream.setFixedHeight(90)
+        stream_lay.addWidget(self.matrix_stream)
+        lay.addWidget(stream_panel)
 
         lay.addStretch()
         return w
@@ -343,13 +456,28 @@ class GraceHUD(QMainWindow):
         self.sig_state.connect(self._on_state)
         self.sig_message.connect(self._on_message)
         self.sig_attach_play.connect(self._on_attach_play)
+        self.sig_alert_toaster.connect(self.show_toaster)
         self.sig_metrics.connect(self._on_metrics)
         self.sig_latency.connect(self._on_latency)
         self.sig_wave.connect(self.audio_monitor.update_bars)
         self.sig_wave.connect(self.small_wave.update_bars)
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
+        self.sig_rag_stats.connect(self._on_rag_stats)
         self.btn_shutdown.clicked.connect(self.close)
+        self.btn_train.clicked.connect(self._open_enrollment)
+        self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)
+        
+    def _open_enrollment(self):
+        self.is_enrolling = True
+        dialog = VoiceEnrollmentDialog(self)
+        dialog.exec()
+        self.is_enrolling = False
+        
+        # Clear backlog audio to prevent accidental triggers from stale mic data
+        from core.audio import mic_queue
+        with mic_queue.mutex:
+            mic_queue.queue.clear()
 
     def _start_timers(self):
         self.timer_clock = QTimer()
@@ -431,25 +559,54 @@ class GraceHUD(QMainWindow):
         if state == "IDLE":
             self.lbl_input_state.setText("AWAITING INPUT...")
             self.lbl_input_state.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+            self.matrix_stream.set_speed("CALM")
+            self.matrix_stream.set_color(CYAN_DIM)
         elif state == "LISTENING":
             self.lbl_input_state.setText("LISTENING...")
             self.lbl_input_state.setStyleSheet(f"color: {GREEN}; background: transparent;")
+            self.matrix_stream.set_speed("FAST")
+            self.matrix_stream.set_color(CYAN_DIM)
         elif state == "PROCESSING":
             self.lbl_input_state.setText("THINKING...")
             self.lbl_input_state.setStyleSheet(f"color: {AMBER}; background: transparent;")
+            self.matrix_stream.set_speed("FAST")
+            self.matrix_stream.set_color(CYAN_DIM)
         elif state == "SPEAKING":
             self.lbl_input_state.setText("SPEAKING...")
             self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
+            self.matrix_stream.set_speed("FAST")
+            self.matrix_stream.set_color(PINK)
+        elif state == "REJECTED":
+            self.lbl_input_state.setText("UNKNOWN SPEAKER REJECTED")
+            self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
+            self.matrix_stream.set_speed("CALM")
+            self.matrix_stream.set_color(PINK)
             
         self.timer_wave.setInterval(50 if state == "LISTENING" else 40 if state == "SPEAKING" else 80)
+        
+    def _on_rag_stats(self, stats: dict):
+        if "pinecone" in stats and stats["pinecone"]:
+            pc = stats["pinecone"]
+            self.metric_pc_vectors.set_value(str(pc.get("totalVectorCount", 0)))
+            self.metric_pc_full.set_value(f"{pc.get('indexFullness', 0) * 100:.1f}%")
+            self.metric_pc_latency.set_value(f"{pc.get('latencyMs', 0)}ms")
+        if "dynamo" in stats and stats["dynamo"]:
+            dy = stats["dynamo"]
+            self.metric_dy_rcu.set_value(f"{dy.get('rcu', 0):.1f}")
+            self.metric_dy_wcu.set_value(f"{dy.get('wcu', 0):.1f}")
 
-    def _on_message(self, speaker: str, text: str):
+    def _on_message(self, speaker: str, text: str, tools: list):
         if self.latest_bubble:
             try:
                 self.latest_bubble.remove_play_button()
             except Exception:
                 pass
             self.latest_bubble = None
+
+        if tools:
+            tools_str = ", ".join(tools)
+            badge_html = f"<br><br><span style='color: #888888; font-size: 10px;'><i>🛠️ Tools: {tools_str}</i></span>"
+            text += badge_html
 
         bubble = ChatBubble(speaker, text)
         
@@ -470,9 +627,10 @@ class GraceHUD(QMainWindow):
             
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, row)
         
-        if speaker == "YOU":
-            self.query_count += 1
-            self.lbl_queries.setText(str(self.query_count))
+        if speaker == "YOU" or speaker == "GRACE":
+            self.bubble_count += 1
+            self.lbl_queries.setText(str(self.bubble_count))
+            self.api_pane.update_usage(self.bubble_count)
             
         QTimer.singleShot(50, self._scroll_bottom)
 
@@ -480,12 +638,23 @@ class GraceHUD(QMainWindow):
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
 
+    def clear_chat_ui(self):
+        while self.chat_layout.count():
+            item = self.chat_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.latest_bubble = None
+        self.bubble_count = 0
+        self.lbl_queries.setText("0")
+        self.api_pane.update_usage(0)
+
     # ── THREAD-SAFE SETTERS ───────────────
     def set_state(self, state: str):
         self.sig_state.emit(state)
 
-    def add_message(self, speaker: str, text: str):
-        self.sig_message.emit(speaker, text)
+    def add_message(self, speaker: str, text: str, tools: list = None):
+        self.sig_message.emit(speaker, text, tools or [])
 
     def set_waveform(self, bars: list):
         self.sig_wave.emit(bars)
@@ -493,6 +662,21 @@ class GraceHUD(QMainWindow):
     def _on_attach_play(self, callback):
         if self.latest_bubble:
             self.latest_bubble.add_play_button(callback)
+
+    def _prompt_clear_dynamo(self):
+        from PyQt6.QtWidgets import QDialog
+        dlg = DangerConfirmDialog("Are you sure you want to erase the current short-term session memory from DynamoDB? You will lose recent context.", self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.sig_clear_dynamo.emit()
+
+    def _prompt_clear_pinecone(self):
+        from PyQt6.QtWidgets import QDialog
+        dlg = DangerConfirmDialog("Are you sure you want to PERMANENTLY erase ALL long-term memories from Pinecone? This action CANNOT BE UNDONE.", self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.sig_clear_pinecone.emit()
+
+    def show_toaster(self, message):
+        self.toaster = ToasterMessage(message, self)
 
     def attach_play_button_to_latest(self, callback):
         self.sig_attach_play.emit(callback)

@@ -1,7 +1,7 @@
 import math
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QPoint
+from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color, sans
 
 # GLOW LABEL
@@ -22,6 +22,15 @@ class CyberPanel(QFrame):
         self.label = label
         self.glow  = glow
         self.setStyleSheet("background: transparent; border: none;")
+        
+        self._phase = 0.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(50)
+        
+    def _tick(self):
+        self._phase = (self._phase + 0.05) % (2 * math.pi)
+        self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -42,7 +51,8 @@ class CyberPanel(QFrame):
         p.drawRoundedRect(r, 6, 6)
         
         # 3. Corner brackets decoration
-        c_glow = parse_color(self.glow, 120)
+        pulse = (math.sin(self._phase) + 1) / 2
+        c_glow = parse_color(self.glow, int(60 + pulse * 140))
         p.setPen(QPen(c_glow, 1))
         cs = 8  # length of bracket
         offset = 4
@@ -78,7 +88,47 @@ class CyberPanel(QFrame):
             p.drawText(19, r.top() - th // 2 + fm.ascent(), self.label)
 
 # ──────────────────────────────────────────
-# STAT BAR
+# PULSING DOT (Topbar / Status Indicator)
+# ──────────────────────────────────────────
+class PulsingDot(QWidget):
+    """A small dot that pulses with a soft breathing glow animation."""
+    def __init__(self, color=GREEN, size=8, parent=None):
+        super().__init__(parent)
+        self.color_str = color
+        self.dot_size  = size
+        self.setFixedSize(size + 6, size + 6)
+        self._phase = 0.0
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)  # ~25fps
+
+    def _tick(self):
+        self._phase = (self._phase + 0.12) % (2 * math.pi)
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx = self.width() // 2
+        cy = self.height() // 2
+        ds = self.dot_size
+
+        pulse = (math.sin(self._phase) + 1) / 2   # 0..1
+        # Outer glow halo
+        halo_r = int(ds // 2 + 3 + pulse * 3)
+        halo_alpha = int(20 + pulse * 60)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(self.color_str, halo_alpha))
+        p.drawEllipse(cx - halo_r, cy - halo_r, halo_r * 2, halo_r * 2)
+
+        # Solid core dot
+        core_alpha = int(160 + pulse * 95)
+        p.setBrush(parse_color(self.color_str, core_alpha))
+        p.drawEllipse(cx - ds // 2, cy - ds // 2, ds, ds)
+
+# ──────────────────────────────────────────
+# STAT BAR (with shimmer scan animation)
 # ──────────────────────────────────────────
 class StatBar(QWidget):
     def __init__(self, label, color=CYAN, parent=None):
@@ -86,7 +136,16 @@ class StatBar(QWidget):
         self.label = label
         self.color = color
         self._value = 0
+        self._scan_pos = 0.0   # 0..1, shimmer position
         self.setFixedHeight(22)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(50)
+
+    def _tick(self):
+        self._scan_pos = (self._scan_pos + 0.025) % 1.0
+        self.update()
 
     def setValue(self, v):
         self._value = max(0, min(100, v))
@@ -107,7 +166,7 @@ class StatBar(QWidget):
         tw = w - tx - 44
         
         p.setPen(Qt.PenStyle.NoPen)
-        c_track = parse_color(self.color, 24)  # faint transparent track background
+        c_track = parse_color(self.color, 24)
         p.setBrush(c_track)
         p.drawRoundedRect(tx, h // 2 - 2, tw, 4, 2, 2)
         
@@ -115,6 +174,17 @@ class StatBar(QWidget):
         if fill_w > 0:
             p.setBrush(parse_color(self.color))
             p.drawRoundedRect(tx, h // 2 - 2, fill_w, 4, 2, 2)
+
+            # Shimmer scan highlight within filled area
+            scan_x = tx + int(fill_w * self._scan_pos)
+            shimmer_w = max(6, fill_w // 4)
+            # Clamp shimmer to filled region
+            scan_x = min(scan_x, tx + fill_w - 2)
+            shim_start = max(tx, scan_x - shimmer_w // 2)
+            shim_end   = min(tx + fill_w, scan_x + shimmer_w // 2)
+            if shim_end > shim_start:
+                p.setBrush(parse_color(self.color, 90))
+                p.drawRoundedRect(shim_start, h // 2 - 3, shim_end - shim_start, 6, 2, 2)
             
         # 3. Value on right
         p.setFont(mono(9, True))
@@ -200,7 +270,7 @@ class SmallWaveformWidget(QWidget):
             p.drawRoundedRect(x, y, bw, bh, 1.5, 1.5)
 
 # ──────────────────────────────────────────
-# STATE INDICATOR
+# STATE INDICATOR (with breathing pulse dot)
 # ──────────────────────────────────────────
 class StateIndicator(QWidget):
     STATES = {
@@ -213,7 +283,18 @@ class StateIndicator(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state = "IDLE"
+        self._pulse = 0.0
         self.setFixedHeight(30)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)
+
+    def _tick(self):
+        # Speed up pulse for active states
+        speed = 0.18 if self._state in ("LISTENING", "PROCESSING", "SPEAKING") else 0.08
+        self._pulse = (self._pulse + speed) % (2 * math.pi)
+        self.update()
         
     def set_state(self, s):
         self._state = s
@@ -233,64 +314,123 @@ class StateIndicator(QWidget):
         
         total_w = 8 + 8 + tw
         start_x = (w - total_w) // 2
-        
+
+        pulse = (math.sin(self._pulse) + 1) / 2   # 0..1
+
+        # Outer breathing halo
+        halo_r = int(7 + pulse * 4)
+        halo_alpha = int(30 + pulse * 80)
         p.setPen(Qt.PenStyle.NoPen)
-        c_glow = parse_color(color, 100)
-        p.setBrush(c_glow)
+        p.setBrush(parse_color(color, halo_alpha))
+        cx_dot = start_x + 4
+        cy_dot = h // 2
+        p.drawEllipse(cx_dot - halo_r + 4, cy_dot - halo_r, halo_r * 2, halo_r * 2)
+
+        # Middle glow ring
+        p.setBrush(parse_color(color, int(60 + pulse * 60)))
         p.drawEllipse(start_x - 1, h // 2 - 5, 10, 10)
         
-        p.setBrush(parse_color(color))
+        # Solid core dot
+        p.setBrush(parse_color(color, int(180 + pulse * 75)))
         p.drawEllipse(start_x, h // 2 - 4, 8, 8)
         
+        # State text
         p.setPen(parse_color(color))
         p.drawText(start_x + 16, (h - th) // 2 + fm.ascent(), text)
 
 # ──────────────────────────────────────────
-# STATUS RING (Concentric Animated HUD Circle)
+# STATUS RING (Dual orbit dots + arc sweep)
 # ──────────────────────────────────────────
 class StatusRing(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state = "IDLE"
-        self.setFixedSize(72, 72)
-        self._angle = 0
+        self.setFixedSize(80, 80)
+        self._angle  = 0      # primary dot angle
+        self._angle2 = 180    # secondary dot (counter-rotating)
+        self._arc_span = 0    # animated arc span
+        self._arc_growing = True
         
         # Rotating dot timer
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._rotate)
-        self.timer.start(30)
+        self.timer.start(28)
         
     def set_state(self, state):
         self._state = state
         self.update()
         
     def _rotate(self):
-        self._angle = (self._angle + 2) % 360
+        speed = 3 if self._state == "PROCESSING" else 2 if self._state in ("LISTENING", "SPEAKING") else 1
+        self._angle  = (self._angle  + speed) % 360
+        self._angle2 = (self._angle2 - speed) % 360  # counter-rotate
+
+        # Arc breathes in/out
+        arc_speed = 3 if self._state == "PROCESSING" else 2
+        if self._arc_growing:
+            self._arc_span += arc_speed
+            if self._arc_span >= 120:
+                self._arc_growing = False
+        else:
+            self._arc_span -= arc_speed
+            if self._arc_span <= 20:
+                self._arc_growing = True
+
         self.update()
         
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        color_str = CYAN if self._state in ["LISTENING", "IDLE"] else (AMBER if self._state == "PROCESSING" else PINK)
+        color_str = (
+            CYAN  if self._state in ("LISTENING", "IDLE") else
+            AMBER if self._state == "PROCESSING" else
+            PINK
+        )
         color = parse_color(color_str)
         
         w, h = self.width(), self.height()
         cx, cy = w // 2, h // 2
         
-        r_outer = 28
-        r_inner = 20
-        
-        # Outer ring
-        p.setPen(QPen(parse_color(CYAN_DIM), 1))
+        r_outer  = 32
+        r_mid    = 24
+        r_inner  = 16
+
+        # ── Outermost dim ring ──────────────────
+        p.setPen(QPen(parse_color(CYAN_DIM, 60), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(cx - r_outer, cy - r_outer, r_outer * 2, r_outer * 2)
-        
-        # Inner ring
-        p.setPen(QPen(parse_color(BORDER), 1))
+
+        # ── Animated glowing arc on outer ring ─
+        arc_pen = QPen(parse_color(color_str, 140), 2)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arc_pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        arc_rect = QRectF(cx - r_outer, cy - r_outer, r_outer * 2, r_outer * 2)
+        # Qt arc: start & span in 1/16ths of a degree
+        arc_start = int((self._angle - self._arc_span // 2) * 16)
+        p.drawArc(arc_rect, arc_start, int(self._arc_span * 16))
+
+        # ── Mid ring ────────────────────────────
+        p.setPen(QPen(parse_color(BORDER, 80), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(cx - r_mid, cy - r_mid, r_mid * 2, r_mid * 2)
+
+        # ── Inner ring (tiny tick marks) ────────
+        p.setPen(QPen(parse_color(color_str, 45), 1))
         p.drawEllipse(cx - r_inner, cy - r_inner, r_inner * 2, r_inner * 2)
-        
-        # Center Text "GRACE"
+
+        # Tick marks on inner ring (4 cardinal points)
+        for deg in (0, 90, 180, 270):
+            rad = math.radians(deg)
+            x1 = cx + (r_inner - 2) * math.cos(rad)
+            y1 = cy + (r_inner - 2) * math.sin(rad)
+            x2 = cx + (r_inner + 3) * math.cos(rad)
+            y2 = cy + (r_inner + 3) * math.sin(rad)
+            p.setPen(QPen(parse_color(color_str, 90), 1))
+            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # ── Center Text "GRACE" ──────────────────
         p.setPen(parse_color(TEXT_DIM))
         p.setFont(mono(8, True))
         fm = p.fontMetrics()
@@ -298,18 +438,28 @@ class StatusRing(QWidget):
         th = fm.height()
         p.drawText(cx - tw // 2, cy + th // 2 - fm.descent() - 2, "GRACE")
         
-        # Revolving dot on outer ring
+        # ── Primary revolving dot (outer ring) ──
         rad = math.radians(self._angle)
         dot_x = cx + r_outer * math.cos(rad)
         dot_y = cy + r_outer * math.sin(rad)
-        
+
         p.setPen(Qt.PenStyle.NoPen)
-        c_glow = parse_color(color_str, 100)
-        p.setBrush(c_glow)
-        p.drawEllipse(int(dot_x - 4), int(dot_y - 4), 8, 8)
-        
+        # Glow halo
+        p.setBrush(parse_color(color_str, 70))
+        p.drawEllipse(int(dot_x - 5), int(dot_y - 5), 10, 10)
+        # Bright core
         p.setBrush(color)
         p.drawEllipse(int(dot_x - 3), int(dot_y - 3), 6, 6)
+
+        # ── Secondary counter-rotating dot (mid ring) ──
+        rad2 = math.radians(self._angle2)
+        dot2_x = cx + r_mid * math.cos(rad2)
+        dot2_y = cy + r_mid * math.sin(rad2)
+
+        p.setBrush(parse_color(color_str, 55))
+        p.drawEllipse(int(dot2_x - 4), int(dot2_y - 4), 8, 8)
+        p.setBrush(parse_color(color_str, 160))
+        p.drawEllipse(int(dot2_x - 2), int(dot2_y - 2), 4, 4)
 
 # ──────────────────────────────────────────
 # CHAT BUBBLE
@@ -466,8 +616,13 @@ class CyberButton(QPushButton):
 # TELEMETRY DASHBOARD COMPONENTS
 # ──────────────────────────────────────────
 class TelemetryMetric(QWidget):
+    """Network latency display with a sweeping scan-line animation."""
     def __init__(self, title, value="--", color=CYAN, parent=None):
         super().__init__(parent)
+        self.color_str = color
+        self._scan = 0.0   # 0..1 horizontal sweep position
+        self.setMinimumHeight(60)
+
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(10, 10, 10, 10)
         self.lay.setSpacing(4)
@@ -481,6 +636,31 @@ class TelemetryMetric(QWidget):
         
         self.setStyleSheet(f"background: rgba(0, 212, 255, 0.03); border: 1px solid {BORDER}; border-radius: 4px;")
 
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(40)
+
+    def _tick(self):
+        self._scan = (self._scan + 0.018) % 1.0
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # Sweep scan line across the widget
+        scan_x = int(self._scan * (w + 40)) - 20
+        grad = QConicalGradient(scan_x, h // 2, 0)
+        c = parse_color(self.color_str, 0)
+        c2 = parse_color(self.color_str, 28)
+        # Draw a faint vertical sweep bar
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(self.color_str, 18))
+        bar_w = max(8, w // 6)
+        p.drawRect(max(0, scan_x - bar_w // 2), 0, bar_w, h)
+
     def set_value(self, val):
         self.lbl_value.setText(str(val))
 
@@ -490,6 +670,7 @@ class TelemetryBar(QWidget):
         self.max_val = max_val
         self.current_val = 0
         self.color = color
+        self._scan = 0.0
         
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(10, 10, 10, 10)
@@ -503,32 +684,300 @@ class TelemetryBar(QWidget):
         h_lay.addStretch()
         h_lay.addWidget(self.lbl_perc)
         
-        # Progress Bar
-        from PyQt6.QtWidgets import QProgressBar
-        self.bar = QProgressBar()
-        self.bar.setFixedHeight(8)
-        self.bar.setTextVisible(False)
-        self.bar.setMaximum(max_val)
-        self.bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: {BG2};
-                border: 1px solid {BORDER};
-                border-radius: 2px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {color};
-                border-radius: 1px;
-            }}
-        """)
-        
         self.lay.addLayout(h_lay)
-        self.lay.addWidget(self.bar)
+        
+        self.bar_space = QWidget()
+        self.bar_space.setFixedHeight(12)
+        self.lay.addWidget(self.bar_space)
         
         self.setStyleSheet(f"background: rgba(0, 212, 255, 0.03); border: 1px solid {BORDER}; border-radius: 4px;")
 
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(45)
+
+    def _tick(self):
+        self._scan = (self._scan + 0.02) % 1.0
+        self.update()
+
     def set_value(self, val):
         self.current_val = min(val, self.max_val)
-        self.bar.setValue(self.current_val)
         perc = int((self.current_val / self.max_val) * 100) if self.max_val > 0 else 0
         self.lbl_perc.setText(f"{perc}%")
+        self.update()
 
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        bx = self.bar_space.x()
+        by = self.bar_space.y()
+        bw = self.bar_space.width()
+        bh = self.bar_space.height()
+        
+        # Track
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(BG2))
+        p.drawRoundedRect(bx, by, bw, bh, 2, 2)
+        
+        # Fill
+        fill_w = int(bw * (self.current_val / max(1, self.max_val)))
+        if fill_w > 0:
+            p.setBrush(parse_color(self.color, 160))
+            p.drawRoundedRect(bx, by, fill_w, bh, 2, 2)
+            
+            # Shimmer
+            scan_x = bx + int(fill_w * self._scan)
+            shim_w = 20
+            scan_x = min(scan_x, bx + fill_w)
+            shim_start = max(bx, scan_x - shim_w // 2)
+            shim_end   = min(bx + fill_w, scan_x + shim_w // 2)
+            if shim_end > shim_start:
+                p.setBrush(parse_color(self.color, 255))
+                p.drawRoundedRect(shim_start, by, shim_end - shim_start, bh, 2, 2)
+        
+        # Grid lines
+        p.setPen(parse_color(BORDER, 80))
+        for i in range(1, 10):
+            gx = bx + (bw * i) // 10
+            p.drawLine(gx, by, gx, by + bh)
+
+# ──────────────────────────────────────────
+# HEX MATRIX STREAMER
+# ──────────────────────────────────────────
+import random
+class HexMatrixStream(QWidget):
+    def __init__(self, color=CYAN_DIM, parent=None):
+        super().__init__(parent)
+        self.color = color
+        self.lines = ["" for _ in range(6)]
+        self.mode = "FAST"
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(80)
+
+    def set_color(self, color):
+        self.color = color
+        self.update()
+
+    def set_speed(self, mode):
+        self.mode = mode
+        if mode == "CALM":
+            self.timer.setInterval(250)
+        else:
+            self.timer.setInterval(80)
+
+    def _tick(self):
+        chance = 0.05 if self.mode == "CALM" else 0.2
+        for i in range(len(self.lines)):
+            if random.random() > chance:
+                self.lines[i] = " ".join(f"{random.randint(0, 255):02X}" for _ in range(8))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setFont(mono(7))
+        h = self.height()
+        w = self.width()
+        step = h // max(1, len(self.lines))
+        for i, text in enumerate(self.lines):
+            # random opacity flicker
+            base_alpha = 20 if self.mode == "CALM" else 40
+            flicker = 30 if self.mode == "CALM" else 80
+            alpha = int(base_alpha + random.random() * flicker)
+            p.setPen(parse_color(self.color, alpha))
+            p.drawText(0, i * step, w, step, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+
+# ──────────────────────────────────────────
+# ANIMATED SIDE PANE (API QUOTA CAROUSEL)
+# ──────────────────────────────────────────
+class AnimatedSidePane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(0)
+        self.setMinimumWidth(0)
+        self.is_open = False
+        
+        self.setStyleSheet(f"background: {BG2}; border-left: 1px solid {BORDER};")
+        
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(12, 16, 12, 12)
+        main_lay.setSpacing(10)
+        
+        # Header
+        header_lay = QHBoxLayout()
+        header_lay.setContentsMargins(0,0,0,0)
+        title = GlowLabel("API LIMITS", CYAN, 10, True)
+        self.btn_close = CyberButton("X", PINK)
+        self.btn_close.setFixedWidth(30)
+        self.btn_close.clicked.connect(self.toggle)
+        
+        header_lay.addWidget(title, 1)
+        header_lay.addWidget(self.btn_close, 0)
+        main_lay.addLayout(header_lay)
+        
+        # Carousel
+        self.carousel = QStackedWidget()
+        self.carousel.setStyleSheet("background: transparent; border: none;")
+        
+        # Page 1: Indexer Model (2.5 Flash Lite)
+        page1 = QWidget()
+        p1_lay = QVBoxLayout(page1)
+        p1_lay.setContentsMargins(0,10,0,0)
+        p1_lay.addWidget(GlowLabel("INDEXER MODEL", PINK, 9, True))
+        p1_lay.addWidget(GlowLabel("Gemini 2.5 Flash Lite", TEXT_DIM, 8))
+        p1_lay.addSpacing(10)
+        
+        self.lbl_idx_usage = GlowLabel("UNINDEXED: 0 / 40", CYAN, 11, True)
+        p1_lay.addWidget(self.lbl_idx_usage)
+        p1_lay.addWidget(GlowLabel("Fires background summarizer every 40 msgs", TEXT_DIM, 8))
+        p1_lay.addStretch()
+        self.carousel.addWidget(page1)
+
+        # Page 2: Main Model (3.1 Flash Lite)
+        page2 = QWidget()
+        p2_lay = QVBoxLayout(page2)
+        p2_lay.setContentsMargins(0,10,0,0)
+        p2_lay.addWidget(GlowLabel("MAIN MODEL", AMBER, 9, True))
+        p2_lay.addWidget(GlowLabel("Gemini 3.1 Flash Lite", TEXT_DIM, 8))
+        p2_lay.addSpacing(10)
+        
+        self.lbl_main_usage = GlowLabel("CONTEXT: 0 / 50", CYAN, 11, True)
+        p2_lay.addWidget(self.lbl_main_usage)
+        p2_lay.addWidget(GlowLabel("Max short-term memory capacity", TEXT_DIM, 8))
+        p2_lay.addStretch()
+        self.carousel.addWidget(page2)
+        
+        main_lay.addWidget(self.carousel, 1)
+        
+        # Nav row
+        nav_lay = QHBoxLayout()
+        nav_lay.setContentsMargins(0,0,0,0)
+        self.btn_prev = CyberButton("<", CYAN_MID)
+        self.btn_next = CyberButton(">", CYAN_MID)
+        
+        self.btn_prev.clicked.connect(self._prev)
+        self.btn_next.clicked.connect(self._next)
+        
+        nav_lay.addWidget(self.btn_prev)
+        nav_lay.addStretch()
+        nav_lay.addWidget(self.btn_next)
+        main_lay.addLayout(nav_lay)
+        
+        # Animation
+        self.anim = QPropertyAnimation(self, b"maximumWidth")
+        self.anim.setDuration(400)
+        self.anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+    def toggle(self):
+        if self.is_open:
+            self.anim.setStartValue(250)
+            self.anim.setEndValue(0)
+            self.is_open = False
+        else:
+            self.anim.setStartValue(0)
+            self.anim.setEndValue(250)
+            self.is_open = True
+        self.anim.start()
+        
+    def _prev(self):
+        curr = self.carousel.currentIndex()
+        if curr > 0:
+            self.carousel.setCurrentIndex(curr - 1)
+        
+    def _next(self):
+        curr = self.carousel.currentIndex()
+        if curr < self.carousel.count() - 1:
+            self.carousel.setCurrentIndex(curr + 1)
+            
+    def update_usage(self, bubble_count: int):
+        self.lbl_main_usage.setText(f"CONTEXT: {bubble_count} / 50")
+        unindexed = bubble_count % 40
+        if bubble_count > 0 and bubble_count % 40 == 0:
+            unindexed = 40
+        self.lbl_idx_usage.setText(f"UNINDEXED: {unindexed} / 40")
+
+# ──────────────────────────────────────────
+# DANGER ZONE CONFIRMATION DIALOG
+# ──────────────────────────────────────────
+class DangerConfirmDialog(QDialog):
+    def __init__(self, message, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("DANGER ZONE")
+        self.setFixedSize(400, 200)
+        self.setStyleSheet(f"background-color: #0b0e14; border: 2px solid #ff4444; border-radius: 8px;")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(15)
+        
+        title = GlowLabel("⚠️ DANGER ZONE ⚠️", "#ff4444", 14, True)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(title)
+        
+        msg = GlowLabel(message, "#8892b0", 10)
+        msg.setWordWrap(True)
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(msg)
+        
+        lay.addStretch()
+        
+        btn_lay = QHBoxLayout()
+        btn_lay.setSpacing(15)
+        
+        btn_no = CyberButton("CANCEL", "#00d4ff")
+        btn_no.clicked.connect(self.reject)
+        
+        btn_yes = CyberButton("YES, NUKE IT", "#ff4444")
+        btn_yes.clicked.connect(self.accept)
+        
+        btn_lay.addWidget(btn_no)
+        btn_lay.addWidget(btn_yes)
+        
+        lay.addLayout(btn_lay)
+
+# ──────────────────────────────────────────
+# TOASTER MESSAGE
+# ──────────────────────────────────────────
+class ToasterMessage(QWidget):
+    def __init__(self, message, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(300, 80)
+        self.setStyleSheet(f"background-color: #0b0e14; border: 1px solid #ffb000; border-radius: 6px;")
+        
+        lay = QVBoxLayout(self)
+        
+        lbl = GlowLabel(message, "#ffb000", 9, True)
+        lbl.setWordWrap(True)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(lbl)
+        
+        self.raise_()
+        self.show()
+        
+        if parent:
+            self.start_pos = parent.rect().topRight() + QPoint(-320, -100)
+            self.end_pos = parent.rect().topRight() + QPoint(-320, 20)
+            self.move(self.start_pos)
+            
+            self.anim = QPropertyAnimation(self, b"pos")
+            self.anim.setDuration(400)
+            self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self.anim.setStartValue(self.start_pos)
+            self.anim.setEndValue(self.end_pos)
+            
+            self.timer = QTimer(self)
+            self.timer.setSingleShot(True)
+            self.timer.timeout.connect(self.hide_toaster)
+            
+            self.anim.finished.connect(lambda: self.timer.start(4000))
+            self.anim.start()
+
+    def hide_toaster(self):
+        self.anim.setDirection(QPropertyAnimation.Direction.Backward)
+        self.anim.finished.disconnect()
+        self.anim.finished.connect(self.deleteLater)
+        self.anim.start()
