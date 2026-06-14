@@ -82,7 +82,16 @@ export const getRagStats = async () => {
 
 export const clearPineconeMemory = async () => {
     try {
-        await index.deleteAll();
+        let paginationToken = undefined;
+        do {
+            const listResponse = await index.listPaginated({ paginationToken });
+            const vectorIds = listResponse.vectors ? listResponse.vectors.map(v => v.id) : [];
+            if (vectorIds.length > 0) {
+                await index.deleteMany(vectorIds);
+            }
+            paginationToken = listResponse.pagination?.next;
+        } while (paginationToken);
+        
         console.log("[Pinecone] All long-term vectors have been deleted.");
     } catch (e) {
         console.error("Error clearing Pinecone memory:", e);

@@ -1,6 +1,6 @@
 import os
 import math
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QPoint
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QRect, QPoint
 from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient
 try:
@@ -1136,38 +1136,47 @@ class CyberMapWidget(QWidget):
         self.view.page().runJavaScript(js)
 
 
-class MapToggleTab(QPushButton):
+class MapToggleTab(QWidget):
+    clicked = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(30, 120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.is_glowing = False
-        
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
     def set_glow(self, state):
         self.is_glowing = state
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        if not painter.isActive():
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         color = parse_color(PINK) if self.is_glowing else parse_color(CYAN_DIM)
         bg_color = QColor(color.red(), color.green(), color.blue(), 50 if self.is_glowing else 15)
-        
+
         painter.fillRect(self.rect(), bg_color)
-        
+
         pen = QPen(color)
         pen.setWidth(1)
         painter.setPen(pen)
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
-        
+
         painter.setFont(mono(9, True))
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(-90)
-        
+
         text = "MAP READY" if self.is_glowing else "OPEN MAP"
-        rect = QRect(-60, -15, 120, 30)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        r = QRect(-60, -15, 120, 30)
+        painter.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
         painter.end()
 
 

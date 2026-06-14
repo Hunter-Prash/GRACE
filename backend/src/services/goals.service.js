@@ -1,4 +1,4 @@
-import { PutCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, ScanCommand, UpdateCommand, GetCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, getISTTimestamp } from './db.client.js';
 
 // Create Grace Goal
@@ -117,6 +117,62 @@ export async function updateGoalStatus(GoalId, status) {
         return response.Attributes;
     } catch (e) {
         console.error(`WARNING: Could not update goal status: ${e.message}`);
+        throw e;
+    }
+}
+
+// Get milestones for a specific goal
+export async function getGoalMilestones(GoalId) {
+    try {
+        const getCommand = new GetCommand({
+            TableName: "Grace_Goals",
+            Key: {
+                GoalId: GoalId
+            }
+        });
+
+        const response = await docClient.send(getCommand);
+        if (response.Item) {
+            return response.Item.Milestones || {};
+        }
+        return null;
+    } catch (e) {
+        console.error(`WARNING: Could not fetch milestones for goal ${GoalId}: ${e.message}`);
+        throw e;
+    }
+}
+
+// Delete an entire goal or a specific milestone within a goal
+export async function deleteGoalOrMilestone(GoalId, milestoneKey = null) {
+    try {
+        if (milestoneKey) {
+            // Delete specific milestone
+            const normalizedMilestoneKey = milestoneKey.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const updateCommand = new UpdateCommand({
+                TableName: "Grace_Goals",
+                Key: { GoalId: GoalId },
+                UpdateExpression: "REMOVE Milestones.#milestoneKey SET LastUpdated = :now",
+                ExpressionAttributeNames: {
+                    "#milestoneKey": normalizedMilestoneKey
+                },
+                ExpressionAttributeValues: {
+                    ":now": getISTTimestamp()
+                },
+                ReturnValues: "ALL_NEW"
+            });
+            await docClient.send(updateCommand);
+            return `Milestone '${milestoneKey}' deleted from goal '${GoalId}'.`;
+        } else {
+            // Delete the entire goal
+            const deleteCommand = new DeleteCommand({
+                TableName: "Grace_Goals",
+                Key: { GoalId: GoalId }
+            });
+            await docClient.send(deleteCommand);
+            return `Goal '${GoalId}' has been deleted completely.`;
+        }
+    } catch (e) {
+        console.error(`WARNING: Could not delete item for goal ${GoalId}: ${e.message}`);
         throw e;
     }
 }

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_API_KEY } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
-import { createGoal, updateMilestone, getActiveGoals } from './goals.service.js';
+import { createGoal, updateMilestone, getActiveGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
 import { updateDailyMetrics } from './metrics.service.js';
 import { openResource } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
@@ -123,7 +123,7 @@ Filter every career-related response through this question: "How does this move 
             },
             {
                 name: "updateMilestone",
-                description: "Marks a specific milestone within a goal as complete or incomplete.",
+                description: "Marks a specific milestone within a goal as complete or incomplete. IMPORTANT: If you do not know the exact milestone key, use getGoalMilestones first to avoid creating duplicates.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
@@ -164,6 +164,29 @@ Filter every career-related response through this question: "How does this move 
                 parameters: {
                     type: "OBJECT",
                     properties: {} // No parameters needed
+                }
+            },
+            {
+                name: "getGoalMilestones",
+                description: "Fetches all milestones for a specific goal. Use this to find the exact milestone keys before attempting to update a milestone or when asked to list milestones for a particular goal.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        goalId: { type: "STRING", description: "The ID of the goal" }
+                    },
+                    required: ["goalId"]
+                }
+            },
+            {
+                name: "deleteGoalOrMilestone",
+                description: "Deletes an entire goal, or a specific milestone within a goal if milestoneKey is provided. Use this whenever the user asks to delete a goal or remove a milestone.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        goalId: { type: "STRING", description: "The ID of the goal to delete or modify" },
+                        milestoneKey: { type: "STRING", description: "Optional. The specific milestone to delete. If left empty or omitted, the entire goal will be deleted." }
+                    },
+                    required: ["goalId"]
                 }
             },
             {
@@ -255,6 +278,19 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 else if (call.name === 'getActiveGoals') {
                     const goals = await getActiveGoals();
                     toolResult = { success: true, activeGoals: goals };
+                }
+                else if (call.name === 'getGoalMilestones') {
+                    const milestones = await getGoalMilestones(call.args.goalId);
+                    if (milestones !== null) {
+                        toolResult = { success: true, milestones: milestones };
+                    } else {
+                        toolResult = { success: false, error: `Goal ${call.args.goalId} not found.` };
+                    }
+                }
+                else if (call.name === 'deleteGoalOrMilestone') {
+                    const args = call.args;
+                    const message = await deleteGoalOrMilestone(args.goalId, args.milestoneKey);
+                    toolResult = { success: true, message: message };
                 }
                 else if (call.name === 'getCommuteTime') {
                     const args = call.args;
