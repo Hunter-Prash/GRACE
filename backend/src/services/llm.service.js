@@ -51,6 +51,8 @@ export async function processChat(sessionId, userText) {
     if (ragContext && ragContext.result && ragContext.result.hits) {
         // Lowered threshold: Pinecone's llama-text-embed-v2 often scores relevant hits around 0.2 - 0.3
         const relevantHits = ragContext.result.hits.filter(h => h._score > 0.15);
+        console.log(`[RAG ENGINE] Pulled ${relevantHits.length} memories from Pinecone!`);
+
 
         if (relevantHits.length > 0) {
             memoryContextString = "\n\n## LONG-TERM MEMORY RECALL\nThe following facts have been retrieved from your long-term memory because they are mathematically relevant to the user's current message:\n"

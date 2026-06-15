@@ -110,9 +110,9 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
         
         let isDuplicate = false;
         if (pineconeRes && pineconeRes.result && pineconeRes.result.hits && pineconeRes.result.hits.length > 0) {
-            // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.20 threshold as requested.
+            // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.50 threshold to only drop near-identical duplicates.
             const score = pineconeRes.result.hits[0].score || pineconeRes.result.hits[0]._score;
-            if (score > 0.20) {
+            if (score > 0.50) {
                 isDuplicate = true;
                 console.log(`[Indexer] Chunk ${idx + 1} is a duplicate (score: ${score.toFixed(3)}). Dropping.`);
             }
