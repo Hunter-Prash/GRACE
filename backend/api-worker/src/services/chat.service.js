@@ -1,6 +1,6 @@
 import { GetCommand, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, getISTTimestamp } from './db.client.js';
-import { runMemoryIndexer } from '../jobs/indexer.job.js';
+import { triggerIndexerEvent } from './eventbus.service.js';
 
 const TABLE_NAME = "GraceChatSessions";
 
@@ -85,8 +85,8 @@ export async function saveChatMessage(sessionId, userText, graceText) {
         // to prevent them from falling out of the 50-message context window.
         const unindexedCount = history.filter(m => m.isIndexed === false).length;
         if (unindexedCount >= 40) {
-            console.log("[DB] 40 unindexed messages reached! Triggering emergency indexer...");
-            triggerMemoryIndexer(sessionId).catch(console.error);
+            console.log(`[DB] ${unindexedCount} unindexed messages reached! Publishing EventBridge trigger...`);
+            await triggerIndexerEvent(sessionId, unindexedCount);
             return true;
         }
         return false;
@@ -95,46 +95,3 @@ export async function saveChatMessage(sessionId, userText, graceText) {
         console.warn(`WARNING: Could not save message: ${e.message}`);
     }
 }
-
-export async function triggerMemoryIndexer(sessionId = "default") {
-    try {
-        const getCommand = new GetCommand({
-            TableName: TABLE_NAME,
-            Key: { SessionId: sessionId }
-        });
-        
-        const response = await docClient.send(getCommand);
-        if (!response.Item || !response.Item.History) return;
-
-        let history = response.Item.History;
-        const unindexedMessages = history.filter(msg => msg.isIndexed === false);
-
-        if (unindexedMessages.length === 0) return;
-
-        // Run the Gemini Summarizer + LangChain job
-        const chunksIndexed = await runMemoryIndexer(unindexedMessages);
-        
-        // We MUST mark them as indexed even if chunksIndexed === 0
-        // Otherwise, it will enter an infinite loop of triggering every message!
-        history = history.map(msg => {
-            if (msg.isIndexed === false) {
-                return { ...msg, isIndexed: true };
-            }
-            return msg;
-        });
-
-        const putCommand = new PutCommand({
-            TableName: TABLE_NAME,
-            Item: {
-                SessionId: sessionId,
-                History: history,
-                LastUpdated: response.Item.LastUpdated
-            }
-        });
-        await docClient.send(putCommand);
-        console.log(`[DB] Marked ${unindexedMessages.length} messages as isIndexed: true. (Pinecone chunks: ${chunksIndexed})`);
-    } catch (e) {
-        console.error(`[DB] Indexer Trigger failed: ${e.message}`);
-    }
-}
-

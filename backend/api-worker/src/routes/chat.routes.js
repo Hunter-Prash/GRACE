@@ -1,6 +1,7 @@
 import express from 'express';
 import { processChat } from '../services/llm.service.js';
-import { saveChatMessage, loadChatHistory, triggerMemoryIndexer } from '../services/chat.service.js';
+import { saveChatMessage, loadChatHistory } from '../services/chat.service.js';
+import { triggerIndexerEvent } from '../services/eventbus.service.js';
 import { clearChatHistory, clearAllMemory, wipePinecone } from '../services/memory.service.js';
 
 const router = express.Router();
@@ -71,7 +72,8 @@ router.post('/chat', async (req, res) => {
             dbLatencyMs: result.dbLatencyMs,
             dbContextItemsCount: result.dbContextItemsCount,
             toolsUsed: result.toolsUsed,
-            indexerTriggered: indexerTriggered
+            indexerTriggered: indexerTriggered,
+            mapData: result.mapData
         });
 
     } catch (error) {
@@ -84,8 +86,8 @@ router.post('/chat', async (req, res) => {
 router.get('/trigger-indexer', async (req, res) => {
     try {
         console.log("[DEBUG] Manual indexer trigger requested...");
-        await triggerMemoryIndexer("default");
-        res.json({ message: 'Indexer trigger executed successfully.' });
+        await triggerIndexerEvent("default", 40);
+        res.json({ success: true, message: "Emergency indexer event published to AWS EventBridge!" });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to trigger indexer' });

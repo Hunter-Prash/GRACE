@@ -1,10 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_API_KEY } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
-import { createGoal, updateMilestone, getActiveGoals } from './goals.service.js';
+import { createGoal, updateMilestone, getActiveGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
 import { updateDailyMetrics } from './metrics.service.js';
 import { openResource } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
+import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
+import { logToDiscord } from './logger.service.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -50,6 +52,8 @@ export async function processChat(sessionId, userText) {
     if (ragContext && ragContext.result && ragContext.result.hits) {
         // Lowered threshold: Pinecone's llama-text-embed-v2 often scores relevant hits around 0.2 - 0.3
         const relevantHits = ragContext.result.hits.filter(h => h._score > 0.15);
+        await logToDiscord(`[RAG ENGINE] Pulled ${relevantHits.length} memories from Pinecone!`);
+
 
         if (relevantHits.length > 0) {
             memoryContextString = "\n\n## LONG-TERM MEMORY RECALL\nThe following facts have been retrieved from your long-term memory because they are mathematically relevant to the user's current message:\n"
@@ -72,6 +76,7 @@ Scale every response to match the weight of the input. Do not violate this:
 Never pad responses. Never repeat yourself. Say exactly what needs to be said, nothing more.
 
 ## WHO PRASHANT IS
+- **Location:** His home address is Zolo Mirage, Siruseri (Exact GPS: 12.8422,80.2223). His office is TCS Siruseri (Exact GPS: 12.8234,80.2120). When calling map tools for his home or office, you MUST pass the Exact GPS coordinates directly instead of the text strings. If he asks for a commute without specifying an origin, default to his home GPS.
 - **Career:** Software Engineer at TCS in Chennai, working on a Stibo STEP MDM project for Walgreens. Background in Java/OOP, Spring Boot, JPA/Hibernate, PostgreSQL, and React/TypeScript. His singular career goal is to transition into a **Development Engineering role at a Big Tech firm** (Google, Meta, Amazon, etc.). Do NOT frame advice through an SRE lens. His goal is Dev Engineering.
 - **Learning Style:** Cumulative, not daily. He prefers monthly LeetCode summaries over daily streaks. He needs momentum and big-picture framing, not micro-management.
 - **Personality:** Direct, honest, a bit stubborn. He will push back if something doesn't feel right. He hates hollow reassurance. He is a gamer (Xbox, Steam). He takes cold showers. He works hard but is also human.
@@ -121,7 +126,7 @@ Filter every career-related response through this question: "How does this move 
             },
             {
                 name: "updateMilestone",
-                description: "Marks a specific milestone within a goal as complete or incomplete.",
+                description: "Marks a specific milestone within a goal as complete or incomplete. IMPORTANT: If you do not know the exact milestone key, use getGoalMilestones first to avoid creating duplicates.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
@@ -163,6 +168,52 @@ Filter every career-related response through this question: "How does this move 
                     type: "OBJECT",
                     properties: {} // No parameters needed
                 }
+            },
+            {
+                name: "getGoalMilestones",
+                description: "Fetches all milestones for a specific goal. Use this to find the exact milestone keys before attempting to update a milestone or when asked to list milestones for a particular goal.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        goalId: { type: "STRING", description: "The ID of the goal" }
+                    },
+                    required: ["goalId"]
+                }
+            },
+            {
+                name: "deleteGoalOrMilestone",
+                description: "Deletes an entire goal, or a specific milestone within a goal if milestoneKey is provided. Use this whenever the user asks to delete a goal or remove a milestone.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        goalId: { type: "STRING", description: "The ID of the goal to delete or modify" },
+                        milestoneKey: { type: "STRING", description: "Optional. The specific milestone to delete. If left empty or omitted, the entire goal will be deleted." }
+                    },
+                    required: ["goalId"]
+                }
+            },
+            {
+                name: "getCommuteTime",
+                description: "Gets the live ETA, drive time, and exact distance between any two locations or cities. MUST call this whenever the user asks for the distance, route, or commute time between places.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        origin: { type: "STRING", description: "The starting address or landmark" },
+                        destination: { type: "STRING", description: "The destination address or landmark" }
+                    },
+                    required: ["origin", "destination"]
+                }
+            },
+            {
+                name: "getNearbyPlaces",
+                description: "Searches for nearby places like cafes, gyms, or restaurants based on a text query.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        query: { type: "STRING", description: "What to search for, e.g., 'gyms near HITEC City', 'best coffee shops'" }
+                    },
+                    required: ["query"]
+                }
             }
         ]
     }];
@@ -181,6 +232,7 @@ Filter every career-related response through this question: "How does this move 
     let response = await safeSendMessage(chat, { message: userText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
 
     const toolsUsed = [];
+    let mapData = null;
 
 
 
@@ -230,6 +282,35 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const goals = await getActiveGoals();
                     toolResult = { success: true, activeGoals: goals };
                 }
+                else if (call.name === 'getGoalMilestones') {
+                    const milestones = await getGoalMilestones(call.args.goalId);
+                    if (milestones !== null) {
+                        toolResult = { success: true, milestones: milestones };
+                    } else {
+                        toolResult = { success: false, error: `Goal ${call.args.goalId} not found.` };
+                    }
+                }
+                else if (call.name === 'deleteGoalOrMilestone') {
+                    const args = call.args;
+                    const message = await deleteGoalOrMilestone(args.goalId, args.milestoneKey);
+                    toolResult = { success: true, message: message };
+                }
+                else if (call.name === 'getCommuteTime') {
+                    const args = call.args;
+                    const res = await getCommuteTime(args.origin, args.destination);
+                    if (res) {
+                        toolResult = { success: true, eta: res.eta, distance: res.distance };
+                        mapData = { type: 'route', originCoords: res.originCoords, destCoords: res.destCoords };
+                    } else {
+                        toolResult = { success: true, eta: "Could not find route" };
+                    }
+                }
+                else if (call.name === 'getNearbyPlaces') {
+                    const args = call.args;
+                    const places = await getNearbyPlaces(args.query);
+                    toolResult = { success: true, places: places };
+                    mapData = { type: 'places', query: args.query, places: places };
+                }
             } catch (e) {
                 console.error(`Tool execution failed: ${e.message}`);
                 toolResult = { success: false, error: e.message };
@@ -262,6 +343,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         outputTokens,
         dbLatencyMs,
         dbContextItemsCount,
-        toolsUsed
+        toolsUsed,
+        mapData
     };
 }

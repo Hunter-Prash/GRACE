@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Grace Life OS Backend - Hybrid Architecture
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        GEMINI_API_KEY: !Ref GeminiApiKey
+        TOMTOM_API_KEY: !Ref TomTomApiKey
+        AWS_EVENT_BUS_NAME: grace-ai-bus
+        DISCORD_WEBHOOK_URL: !Ref DiscordWebhookUrl
+        AWS_SNS_TOPIC_ARN: !Ref SnsTopicArn
+
+Parameters:
+  GeminiApiKey:
+    Type: String
+    Description: Google Gemini API Key
+  TomTomApiKey:
+    Type: String
+    Description: TomTom Maps API Key
+  DiscordWebhookUrl:
+    Type: String
+    Description: Discord Webhook URL for logs
+  SnsTopicArn:
+    Type: String
+    Description: ARN for the SNS Topic
+
+Resources:
+  GraceApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+  GraceApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: api-worker/
+      Handler: lambda.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: GraceChatSessions
+        - DynamoDBCrudPolicy:
+            TableName: GraceGoals
+        - DynamoDBCrudPolicy:
+            TableName: GraceMetrics
+        - EventBridgePutEventsPolicy:
+            EventBusName: grace-ai-bus
+      Events:
+        ProxyApiRoot:
+          Type: Api
+          Properties:
+            Path: /
+            Method: ANY
+            RestApiId: !Ref GraceApiGateway
+        ProxyApiGreedy:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+            RestApiId: !Ref GraceApiGateway
+
+  GraceIndexerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: indexer-worker/
+      Handler: src/lambda/indexer.handler
+      Timeout: 120
+      MemorySize: 1024
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: GraceChatSessions
+        - SNSPublishMessagePolicy:
+            TopicName: !Select [5, !Split [":", !Ref SnsTopicArn]]
+      Events:
+        BatchReadyRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: grace-ai-bus
+            Pattern:
+              source:
+                - grace.chat.service
+              detail-type:
+                - MemoryBatchReady
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${GraceApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

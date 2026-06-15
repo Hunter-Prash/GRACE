@@ -237,6 +237,10 @@ async def pipeline_async(hud):
                     tools_used = response.get("toolsUsed", [])
                     text_answer = response.get("text", "").strip()
                     hud.add_message("GRACE", text_answer, tools=tools_used)
+
+                    map_data = response.get("mapData")
+                    if map_data:
+                        hud.sig_map_update.emit(map_data)
                     
                     # Track metrics and costs
                     req_in = response.get("inputTokens", 0)
