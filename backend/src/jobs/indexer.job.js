@@ -3,6 +3,7 @@ import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { upsertQuery, getEmbedding } from "../services/rag.service.js";
 import { getISTTimestamp } from "../services/db.client.js";
 import { sendIndexerNotification } from "../services/sns.service.js";
+import { logToDiscord } from "../services/logger.service.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -10,11 +11,11 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const runMemoryIndexer = async (unindexedConversations) => {
     if (!unindexedConversations || unindexedConversations.length === 0) {
-        console.log("[Indexer] No new conversations to index.");
+        console.log("[Indexer] No new conversations to index."); // Do not send to Discord to avoid spam
         return 0;
     }
 
-    console.log(`[Indexer] Processing ${unindexedConversations.length} new messages for long-term memory...`);
+    await logToDiscord(`[Indexer] Processing ${unindexedConversations.length} new messages for long-term memory...`, true);
 
     // 1. Reconstruct the transcript
     const fullTranscript = unindexedConversations
@@ -38,7 +39,7 @@ export const runMemoryIndexer = async (unindexedConversations) => {
     }
     if (currentBatch) rawBatches.push(currentBatch);
 
-    console.log(`[Indexer] Split payload into ${rawBatches.length} batch(es) to protect the 250k token context window.`);
+    await logToDiscord(`[Indexer] Split payload into ${rawBatches.length} batch(es) to protect the 250k token context window.`);
 
     // 3. Summarization with Gemini 2.5 Flash Lite
     const allSummarizedFacts = [];
@@ -53,11 +54,11 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
 
     for (let i = 0; i < rawBatches.length; i++) {
         if (i > 0) {
-            console.log("[Indexer] Sleeping for 8 seconds to respect the 15 RPM API limit...");
+            await logToDiscord("[Indexer] Sleeping for 8 seconds to respect the 15 RPM API limit...");
             await sleep(8000);
         }
 
-        console.log(`[Indexer] Sending Batch ${i + 1} to gemini-2.5-flash-lite for summarization...`);
+        await logToDiscord(`[Indexer] Sending Batch ${i + 1} to gemini-2.5-flash-lite for summarization...`);
         try {
             let response;
             let retries = 3;
@@ -88,19 +89,19 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
 
     const finalSummaryString = allSummarizedFacts.join("\n\n");
     if (!finalSummaryString.trim()) {
-        console.log("[Indexer] No meaningful facts were extracted from this session. Skipping Pinecone upsert.");
+        await logToDiscord("[Indexer] No meaningful facts were extracted from this session. Skipping Pinecone upsert.");
         return 0;
     }
 
     // 4. Chunking the CLEAN data with LangChain
-    console.log("[Indexer] Feeding clean summary into LangChain Text Splitter...");
+    await logToDiscord("[Indexer] Feeding clean summary into LangChain Text Splitter...");
     const splitter = new RecursiveCharacterTextSplitter({
         chunkSize: 400,
         chunkOverlap: 50,
     });
 
     const documents = await splitter.createDocuments([finalSummaryString]);
-    console.log(`[Indexer] LangChain chopped the summary into ${documents.length} vectors. Starting Deduplication...`);
+    await logToDiscord(`[Indexer] LangChain chopped the summary into ${documents.length} vectors. Starting Deduplication...`);
 
     // 5. Deduplicate and Upsert
     const newPineconeRecords = [];
@@ -136,9 +137,9 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
 
     if (newPineconeRecords.length > 0) {
         await upsertQuery(newPineconeRecords);
-        console.log(`[Indexer] Successfully vectorized and stored ${newPineconeRecords.length} NEW high-signal memories in Pinecone!`);
+        await logToDiscord(`[Indexer] Successfully vectorized and stored ${newPineconeRecords.length} NEW high-signal memories in Pinecone!`, true);
     } else {
-        console.log("[Indexer] All chunks were duplicates. Nothing new to store.");
+        await logToDiscord("[Indexer] All chunks were duplicates. Nothing new to store.");
     }
 
     // 6. Send Notification
