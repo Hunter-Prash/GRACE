@@ -1,4 +1,4 @@
-import { sendIndexerNotification } from "./src/services/sns.service.js";
+import { sendIndexerNotification } from "../src/services/sns.service.js";
 
 async function testSNS() {
     console.log("Testing SNS Email Delivery...");

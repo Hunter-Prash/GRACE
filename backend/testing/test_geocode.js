@@ -1,7 +1,7 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
-import { getCommuteTime } from './src/services/maps.service.js';
-dotenv.config();
+import { getCommuteTime } from '../src/services/maps.service.js';
+dotenv.config({ path: '../.env' });
 
 async function run() {
     const origin = 'Srinivasan Nagar, 603103';

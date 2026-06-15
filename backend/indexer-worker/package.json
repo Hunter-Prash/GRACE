@@ -12,6 +12,7 @@
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1063.0",
+    "@aws-sdk/client-eventbridge": "^3.1068.0",
     "@aws-sdk/client-sns": "^3.1068.0",
     "@aws-sdk/lib-dynamodb": "^3.1063.0",
     "@google/genai": "^2.8.0",
