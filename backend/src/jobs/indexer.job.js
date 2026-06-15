@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { upsertQuery, getEmbedding } from "../services/rag.service.js";
 import { getISTTimestamp } from "../services/db.client.js";
+import { sendIndexerNotification } from "../services/sns.service.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -103,6 +104,7 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
 
     // 5. Deduplicate and Upsert
     const newPineconeRecords = [];
+    let duplicatesDropped = 0;
     
     for (let idx = 0; idx < documents.length; idx++) {
         const doc = documents[idx];
@@ -114,6 +116,7 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
             const score = pineconeRes.result.hits[0].score || pineconeRes.result.hits[0]._score;
             if (score > 0.50) {
                 isDuplicate = true;
+                duplicatesDropped++;
                 console.log(`[Indexer] Chunk ${idx + 1} is a duplicate (score: ${score.toFixed(3)}). Dropping.`);
             }
         }
@@ -137,6 +140,9 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
     } else {
         console.log("[Indexer] All chunks were duplicates. Nothing new to store.");
     }
+
+    // 6. Send Notification
+    await sendIndexerNotification(finalSummaryString, newPineconeRecords.length, duplicatesDropped);
 
     return newPineconeRecords.length;
 }

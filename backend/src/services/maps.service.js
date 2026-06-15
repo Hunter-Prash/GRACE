@@ -5,14 +5,22 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Helper function to convert text addresses into GPS coordinates for TomTom Routing
-const getCoordinates = async (address) => {
+const getCoordinates = async (address, biasCoords = null) => {
     // If the LLM already passed raw coordinates, bypass geocoding
     if (/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(address.replace(/\s/g, ''))) {
         return address.replace(/\s/g, '');
     }
 
     try {
-        const url = `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(address)}.json?key=${process.env.TOMTOM_API_KEY}`;
+        // Changed from strict /geocode to /search to handle business names, fuzzy text, and typos
+        let url = `https://api.tomtom.com/search/2/search/${encodeURIComponent(address)}.json?key=${process.env.TOMTOM_API_KEY}`;
+        
+        // Add geographic bias if provided (50km radius) to prevent mapping to other countries
+        if (biasCoords && /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(biasCoords.replace(/\s/g, ''))) {
+            const [lat, lon] = biasCoords.replace(/\s/g, '').split(',');
+            url += `&lat=${lat}&lon=${lon}&radius=50000`;
+        }
+
         const response = await axios.get(url);
         if (response.data.results && response.data.results.length > 0) {
             const pos = response.data.results[0].position;
@@ -29,7 +37,9 @@ export const getCommuteTime = async (origin, destination) => {
     try {
         // 1. Convert "HITEC City" to exact GPS coordinates
         const originCoords = await getCoordinates(origin);
-        const destCoords = await getCoordinates(destination);
+        
+        // Use originCoords to bias the destination search to the local area
+        const destCoords = await getCoordinates(destination, originCoords);
 
         if (!originCoords || !destCoords) {
             console.log("[MAPS] Could not geocode addresses.");
