@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -30,6 +30,7 @@ class GraceHUD(QMainWindow):
     sig_alert_toaster = pyqtSignal(str)
     sig_clear_context = pyqtSignal()
     sig_map_update  = pyqtSignal(dict)
+    sig_show_briefing_panel = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -87,6 +88,7 @@ class GraceHUD(QMainWindow):
 
         self.api_pane = AnimatedSidePane()
         self.map_pane = AnimatedMapPane()
+        self.briefing_pane = DailyBriefingPanel()
         
         self.map_tab = MapToggleTab()
         self.map_tab.clicked.connect(self._on_map_tab_clicked)
@@ -104,6 +106,7 @@ class GraceHUD(QMainWindow):
         body.addWidget(self._right_panel(), 0)
         body.addWidget(self.api_pane, 0)
         body.addWidget(self.map_pane, 0)
+        body.addWidget(self.briefing_pane, 0)
         body.addLayout(tab_lay, 0)
         main.addLayout(body, 1)
 
@@ -479,6 +482,7 @@ class GraceHUD(QMainWindow):
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
         self.sig_rag_stats.connect(self._on_rag_stats)
+        self.sig_show_briefing_panel.connect(self.briefing_pane.slide_in)
         self.btn_shutdown.clicked.connect(self.close)
         self.btn_train.clicked.connect(self._open_enrollment)
         self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)

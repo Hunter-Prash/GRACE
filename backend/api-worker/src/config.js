@@ -14,5 +14,5 @@ try {
     console.warn("Could not load config.yaml. Using environment variables instead.");
 }
 
-export const GEMINI_API_KEY = config.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-export const AWS_REGION = process.env.AWS_REGION || 'ap-south-1';
+export const getGeminiKey = () => config.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+export const getAwsRegion = () => process.env.AWS_REGION || 'ap-south-1';

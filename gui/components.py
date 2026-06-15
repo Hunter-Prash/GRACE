@@ -907,6 +907,109 @@ class AnimatedSidePane(QWidget):
         self.lbl_idx_usage.setText(f"UNINDEXED: {unindexed} / 40")
 
 # ──────────────────────────────────────────
+# DAILY BRIEFING PANEL (Frosted Glass UI)
+# ──────────────────────────────────────────
+class DailyBriefingPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(0)
+        self.setMinimumWidth(0)
+        self.is_open = False
+        
+        # Frosted glass styling with a border
+        self.setStyleSheet(f"background: rgba(20, 20, 30, 210); border-left: 1px solid {CYAN_DIM};")
+        
+        self.main_lay = QVBoxLayout(self)
+        self.main_lay.setContentsMargins(15, 20, 15, 20)
+        self.main_lay.setSpacing(15)
+        
+        # Header
+        header_lay = QHBoxLayout()
+        header_lay.setContentsMargins(0,0,0,0)
+        title = GlowLabel("MORNING BRIEFING", CYAN, 12, True)
+        self.btn_close = CyberButton("X", PINK)
+        self.btn_close.setFixedWidth(30)
+        self.btn_close.clicked.connect(self.slide_out)
+        
+        header_lay.addWidget(title, 1)
+        header_lay.addWidget(self.btn_close, 0)
+        self.main_lay.addLayout(header_lay)
+        
+        # We will populate the goals dynamically here
+        self.content_lay = QVBoxLayout()
+        self.content_lay.setSpacing(15)
+        self.main_lay.addLayout(self.content_lay)
+        
+        self.main_lay.addStretch()
+        
+        # Animation
+        self.anim = QPropertyAnimation(self, b"maximumWidth")
+        self.anim.setDuration(600)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        
+    def populate_data(self, goals_data):
+        # Clear old content
+        while self.content_lay.count():
+            child = self.content_lay.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+                
+        goals = goals_data.get("goals", [])[:2] # Top 2 goals
+        
+        for goal in goals:
+            goal_id = goal.get("goalId", "UNKNOWN")
+            milestones = goal.get("milestones", {})
+            total = len(milestones)
+            completed = sum(1 for v in milestones.values() if v)
+            perc = int((completed / max(1, total)) * 100)
+            
+            # Goal Container
+            g_widget = QWidget()
+            g_widget.setStyleSheet(f"background: rgba(0, 212, 255, 0.05); border: 1px solid {BORDER}; border-radius: 4px;")
+            g_lay = QVBoxLayout(g_widget)
+            g_lay.setContentsMargins(10, 10, 10, 10)
+            
+            lbl_title = GlowLabel(goal_id.upper().replace("-", " "), CYAN, 10, True)
+            g_lay.addWidget(lbl_title)
+            
+            # Custom Progress Bar using StatBar
+            bar = StatBar(f"{completed}/{total}", CYAN)
+            bar.setValue(perc)
+            g_lay.addWidget(bar)
+            
+            self.content_lay.addWidget(g_widget)
+
+        # Static Metrics Icons Row (visual flair)
+        metrics_widget = QWidget()
+        m_lay = QHBoxLayout(metrics_widget)
+        m_lay.setContentsMargins(0, 10, 0, 0)
+        
+        lbl_m = GlowLabel("METRICS: ", TEXT_DIM, 8)
+        m_lay.addWidget(lbl_m)
+        m_lay.addWidget(PulsingDot(GREEN, 8)) # Energy
+        m_lay.addWidget(PulsingDot(CYAN, 8))  # Focus
+        m_lay.addWidget(PulsingDot(PINK, 8))  # Mood
+        m_lay.addStretch()
+        
+        self.content_lay.addWidget(metrics_widget)
+
+    def slide_in(self, goals_data=None):
+        if goals_data:
+            self.populate_data(goals_data)
+        if not self.is_open:
+            self.anim.setStartValue(0)
+            self.anim.setEndValue(300)
+            self.is_open = True
+            self.anim.start()
+            
+    def slide_out(self):
+        if self.is_open:
+            self.anim.setStartValue(300)
+            self.anim.setEndValue(0)
+            self.is_open = False
+            self.anim.start()
+
+# ──────────────────────────────────────────
 # DANGER ZONE CONFIRMATION DIALOG
 # ──────────────────────────────────────────
 class DangerConfirmDialog(QDialog):

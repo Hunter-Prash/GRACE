@@ -89,6 +89,53 @@ async def pipeline_async(hud):
                 ).start())
     except Exception as e:
         pass
+        
+    # ── DAILY BRIEFING ENGINE ──
+    # Check if this is the first boot of the day
+    try:
+        quota_path = "quota.json"
+        today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+        quota_data = {}
+        if os.path.exists(quota_path):
+            with open(quota_path, "r") as f:
+                quota_data = json.load(f)
+                
+        last_briefing = quota_data.get("last_briefing_date", "")
+        if last_briefing != today_ist:
+            print("[SYSTEM] First boot of the day detected. Initializing Daily Briefing Sequence.")
+            
+            # 1. Fetch raw goals data from backend for the UI Side Panel
+            def fetch_goals():
+                try:
+                    return requests.get("http://localhost:3000/api/goals/active", timeout=5).json()
+                except Exception:
+                    return None
+                    
+            goals_data = await asyncio.to_thread(fetch_goals)
+            
+            if goals_data:
+                # 2. Trigger the Frosted Glass Side Panel
+                hud.sig_show_briefing_panel.emit(goals_data)
+                
+                # 3. Inject the background system prompt to Grace
+                briefing_prompt = (
+                    "SYSTEM PROMPT: This is the first boot of the day. Please provide Prashant his morning briefing. "
+                    "Use your getActiveGoals tool to estimate completion times, and use your Pinecone memory to "
+                    "recall his activities from the past two days. Summarize this briefly and speak naturally."
+                )
+                
+                # We defer injecting it slightly to let the HUD settle
+                async def inject_briefing():
+                    await asyncio.sleep(1.0)
+                    hud.sig_text_input.emit(briefing_prompt)
+                asyncio.create_task(inject_briefing())
+                
+                # 4. Save today's date so it doesn't trigger again
+                quota_data["last_briefing_date"] = today_ist
+                with open(quota_path, "w") as f:
+                    json.dump(quota_data, f)
+    except Exception as e:
+        print(f"Failed to initialize daily briefing: {e}")
 
     active_session = False
     session_input_tokens = 0

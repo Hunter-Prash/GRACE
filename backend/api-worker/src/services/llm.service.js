@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import { GEMINI_API_KEY } from '../config.js';
+import { getGeminiKey } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
 import { createGoal, updateMilestone, getActiveGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
 import { updateDailyMetrics } from './metrics.service.js';
@@ -31,11 +31,12 @@ async function safeSendMessage(chat, payload, maxRetries = 3) {
 let aiClient = null;
 
 export function initLlmClient() {
-    if (!GEMINI_API_KEY) {
+    const key = getGeminiKey();
+    if (!key) {
         console.error("CRITICAL ERROR: GEMINI_API_KEY is not set.");
         return null;
     }
-    aiClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    aiClient = new GoogleGenAI({ apiKey: key });
     return aiClient;
 }
 
