@@ -1,7 +1,7 @@
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient } from '../services/db.client.js';
-import { runMemoryIndexer } from '../jobs/indexer.job.js';
-import { logToDiscord } from '../services/logger.service.js';
+import { docClient } from './services/db.client.js';
+import { runMemoryIndexer } from './jobs/indexer.job.js';
+import { logToDiscord } from './services/logger.service.js';
 
 const TABLE_NAME = "GraceChatSessions";
 

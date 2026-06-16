@@ -106,15 +106,15 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
     // 5. Deduplicate and Upsert
     const newPineconeRecords = [];
     let duplicatesDropped = 0;
-    
+
     for (let idx = 0; idx < documents.length; idx++) {
         const doc = documents[idx];
         const pineconeRes = await getEmbedding(doc.pageContent, 1);
-        
+
         let isDuplicate = false;
         if (pineconeRes && pineconeRes.result && pineconeRes.result.hits && pineconeRes.result.hits.length > 0) {
             // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.35 threshold to drop semantically near-identical duplicates.
-            const score = pineconeRes.result.hits[0].score || pineconeRes.result.hits[0]._score;
+            const score = pineconeRes.result.hits[0]._score || pineconeRes.result.hits[0]._score;
             if (score > 0.35) {
                 isDuplicate = true;
                 duplicatesDropped++;
@@ -130,9 +130,9 @@ CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if rec
             });
             console.log(`[Indexer] Chunk ${idx + 1} is NEW. Queuing for upsert.`);
         }
-        
+
         // Small sleep to respect Pinecone embedding API limits if many chunks
-        await sleep(500); 
+        await sleep(500);
     }
 
     if (newPineconeRecords.length > 0) {

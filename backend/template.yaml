@@ -74,7 +74,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: indexer-worker/
-      Handler: src/lambda/indexer.handler
+      Handler: src/indexer.handler
       Timeout: 120
       MemorySize: 1024
       Policies:
