@@ -46,13 +46,13 @@ export async function processChat(sessionId, userText) {
     const dbStart = performance.now();
     const dbHistory = await loadChatHistory(sessionId, 50);
 
-    const ragContext = await getEmbedding(userText);
+    const ragContext = await getEmbedding(userText, 5);
 
 
     let memoryContextString = "";
     if (ragContext && ragContext.result && ragContext.result.hits) {
         // Lowered threshold: Pinecone's llama-text-embed-v2 often scores relevant hits around 0.2 - 0.3
-        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.15);
+        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.25);
         await logToDiscord(`[RAG ENGINE] Pulled ${relevantHits.length} memories from Pinecone!`);
 
 

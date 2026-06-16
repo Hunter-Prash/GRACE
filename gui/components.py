@@ -751,18 +751,103 @@ class TelemetryBar(QWidget):
             p.drawLine(gx, by, gx, by + bh)
 
 # ──────────────────────────────────────────
-# HEX MATRIX STREAMER
+# CONTEXT SATURATION RING
+# ──────────────────────────────────────────
+class ContextSaturationRing(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.max_val = 50
+        self.current_val = 0
+        self._anim_val = 0.0
+        
+        self.setFixedHeight(60)
+        self.setMinimumWidth(200)
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(30)
+        
+    def _tick(self):
+        self._anim_val += (self.current_val - self._anim_val) * 0.1
+        if abs(self.current_val - self._anim_val) < 0.1:
+            self._anim_val = self.current_val
+        self.update()
+        
+    def set_value(self, val):
+        self.current_val = min(val, self.max_val)
+        
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        
+        perc = self._anim_val / max(1, self.max_val)
+        
+        if perc < 0.5:
+            color = CYAN
+        elif perc < 0.85:
+            color = AMBER
+        else:
+            color = PINK
+            
+        c = parse_color(color)
+        c_bg = parse_color(color, 40)
+        
+        ring_size = h - 16
+        cx = 10 + ring_size // 2
+        cy = h // 2
+        
+        # Background ring
+        p.setPen(QPen(c_bg, 4))
+        p.drawEllipse(10, cy - ring_size // 2, ring_size, ring_size)
+        
+        # Foreground arc
+        arc_pen = QPen(c, 4)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arc_pen)
+        
+        start_angle = 90 * 16
+        span_angle = int(-perc * 360 * 16)
+        if span_angle != 0:
+            p.drawArc(10, cy - ring_size // 2, ring_size, ring_size, start_angle, span_angle)
+            
+        # Text
+        tx = 10 + ring_size + 16
+        p.setFont(mono(14, True))
+        p.setPen(c)
+        actual_perc = int((self.current_val / max(1, self.max_val)) * 100)
+        p.drawText(tx, cy + 2, f"{actual_perc}%")
+        
+        p.setFont(mono(8))
+        p.setPen(parse_color(TEXT_DIM))
+        p.drawText(tx, cy + 18, "CONTEXT")
+
+# ──────────────────────────────────────────
+# MATRIX RAIN STREAMER
 # ──────────────────────────────────────────
 import random
-class HexMatrixStream(QWidget):
+
+KATAKANA = [chr(i) for i in range(0x30A0, 0x30FF)] + [str(i) for i in range(10)]
+
+class MatrixDrop:
+    def __init__(self, x, h):
+        self.x = x
+        self.y = random.randint(-100, h)
+        self.speed = random.uniform(2, 5)
+        self.chars = [random.choice(KATAKANA) for _ in range(random.randint(6, 16))]
+
+class MatrixRain(QWidget):
     def __init__(self, color=CYAN_DIM, parent=None):
         super().__init__(parent)
         self.color = color
-        self.lines = ["" for _ in range(6)]
-        self.mode = "FAST"
+        self.mode = "CALM"
+        self.drops = []
+        self._init_drops = False
+        self.font_size = 11
+        
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
-        self.timer.start(80)
+        self.timer.start(40)
 
     def set_color(self, color):
         self.color = color
@@ -770,34 +855,59 @@ class HexMatrixStream(QWidget):
 
     def set_speed(self, mode):
         self.mode = mode
-        if mode == "CALM":
-            self.timer.setInterval(250)
-        else:
-            self.timer.setInterval(80)
 
     def _tick(self):
-        chance = 0.05 if self.mode == "CALM" else 0.2
-        for i in range(len(self.lines)):
-            if random.random() > chance:
-                self.lines[i] = " ".join(f"{random.randint(0, 255):02X}" for _ in range(8))
+        h = self.height()
+        w = self.width()
+        
+        if not self._init_drops and w > 0:
+            cols = w // 14
+            for i in range(cols):
+                if random.random() > 0.3:
+                    self.drops.append(MatrixDrop(i * 14 + 4, h))
+            self._init_drops = True
+            
+        # Speed modifier based on Grace's state
+        speed_mult = 1.0
+        if self.mode == "PROCESSING":
+            speed_mult = 0.3
+        elif self.mode in ("LISTENING", "SPEAKING"):
+            speed_mult = 2.0
+            
+        for drop in self.drops:
+            drop.y += drop.speed * speed_mult
+            
+            # Reset if off screen
+            if drop.y - (len(drop.chars) * 14) > h:
+                drop.y = random.randint(-50, -10)
+                drop.chars = [random.choice(KATAKANA) for _ in range(random.randint(6, 16))]
+                
+            # Randomly mutate chars
+            if random.random() > 0.8:
+                idx = random.randint(0, len(drop.chars) - 1)
+                drop.chars[idx] = random.choice(KATAKANA)
+                
         self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setFont(mono(7))
-        h = self.height()
-        w = self.width()
-        step = h // max(1, len(self.lines))
-        for i, text in enumerate(self.lines):
-            # random opacity flicker
-            base_alpha = 20 if self.mode == "CALM" else 40
-            flicker = 30 if self.mode == "CALM" else 80
-            alpha = int(base_alpha + random.random() * flicker)
-            p.setPen(parse_color(self.color, alpha))
-            p.drawText(0, i * step, w, step, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        p.setFont(mono(self.font_size))
+        
+        for drop in self.drops:
+            for i, char in enumerate(drop.chars):
+                char_y = drop.y - (i * 14)
+                if char_y < -14 or char_y > self.height() + 14:
+                    continue
+                    
+                if i == 0:
+                    p.setPen(QColor(255, 255, 255))
+                else:
+                    alpha = max(0, 255 - (i * 20))
+                    p.setPen(parse_color(self.color, alpha))
+                    
+                p.drawText(drop.x, int(char_y), char)
 
-# ──────────────────────────────────────────
 # ANIMATED SIDE PANE (API QUOTA CAROUSEL)
 # ──────────────────────────────────────────
 class AnimatedSidePane(QWidget):

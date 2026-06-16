@@ -5,6 +5,9 @@ import queue
 import pyaudio
 import numpy as np
 import requests
+import json
+import os
+from datetime import datetime
 
 from core.config import STATE_IDLE, STATE_LISTENING, STATE_PROCESSING, STATE_SPEAKING, CHUNK_SIZE
 from core.audio import (
@@ -242,7 +245,7 @@ async def pipeline_async(hud):
             if active_session:
                 if not is_text_cmd:
                     hud.set_state(STATE_LISTENING)
-                    user_cmd = run_live_vad_session(hud)
+                    user_cmd = run_live_vad_session(hud, text_input_queue, cmd_queue)
 
                 if not user_cmd:
                     active_session = False
@@ -322,7 +325,7 @@ async def pipeline_async(hud):
                     hud.set_state(STATE_SPEAKING)
                     
                     from core.audio import stream_synthesize_and_play
-                    interrupted, audio_bytes = await stream_synthesize_and_play(text_answer, hud)
+                    interrupted, audio_bytes = await stream_synthesize_and_play(text_answer, hud, text_input_queue, cmd_queue)
                     
                     # Attach play button trigger to the latest bubble after it finishes generating
                     hud.attach_play_button_to_latest(lambda checked=False, ab=audio_bytes: threading.Thread(

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -256,8 +256,8 @@ class GraceHUD(QMainWindow):
         lay.setContentsMargins(12, 16, 12, 12)
         lay.setSpacing(6)
 
-        # Context Window Saturation Bar at the very top
-        self.bar_context = TelemetryBar("CONTEXT WINDOW SATURATION", max_val=50, color=CYAN)
+        # Context Window Saturation Arc Ring at the very top
+        self.bar_context = ContextSaturationRing()
         lay.addWidget(self.bar_context)
 
         scroll = QScrollArea()
@@ -433,7 +433,7 @@ class GraceHUD(QMainWindow):
         stream_panel = CyberPanel("◈ RAW DATA STREAM", CYAN)
         stream_lay = QVBoxLayout(stream_panel)
         stream_lay.setContentsMargins(12, 16, 12, 12)
-        self.matrix_stream = HexMatrixStream(CYAN_DIM)
+        self.matrix_stream = MatrixRain(CYAN_DIM)
         self.matrix_stream.setFixedHeight(90)
         stream_lay.addWidget(self.matrix_stream)
         lay.addWidget(stream_panel)

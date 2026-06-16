@@ -65,7 +65,7 @@ async def synthesize_speech(text: str) -> bytes:
     audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
     return audio_int16.tobytes()
 
-async def stream_synthesize_and_play(text: str, hud) -> tuple[bool, bytes]:
+async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_queue=None) -> tuple[bool, bytes]:
     """Stream TTS generation directly to speaker_queue and monitor for interruptions."""
     with speaker_queue.mutex:
         speaker_queue.queue.clear()
@@ -105,6 +105,18 @@ async def stream_synthesize_and_play(text: str, hud) -> tuple[bool, bytes]:
     
     # Wait for completion while checking for interruptions
     while is_generating[0] or not speaker_queue.empty():
+        if text_input_queue and not text_input_queue.empty():
+            interrupted[0] = True
+            with speaker_queue.mutex:
+                speaker_queue.queue.clear()
+            break
+            
+        if cmd_queue and not cmd_queue.empty():
+            interrupted[0] = True
+            with speaker_queue.mutex:
+                speaker_queue.queue.clear()
+            break
+            
         try:
             mic_data = mic_queue.get_nowait()
             pcm = np.frombuffer(mic_data, dtype=np.int16)
@@ -120,11 +132,18 @@ async def stream_synthesize_and_play(text: str, hud) -> tuple[bool, bytes]:
         
     return interrupted[0], b''.join(all_bytes)
 
-def run_live_vad_session(hud):
+def run_live_vad_session(hud, text_input_queue=None, cmd_queue=None):
     with mic_queue.mutex:
         mic_queue.queue.clear()
     frames = []
     while True:
+        # If the user types something or clicks a quick action while we are listening,
+        # abort the listening session so the main loop can process the UI action immediately.
+        if text_input_queue and not text_input_queue.empty():
+            return None
+        if cmd_queue and not cmd_queue.empty():
+            return None
+            
         try:
             data = mic_queue.get(timeout=0.1)
             pcm  = np.frombuffer(data, dtype=np.int16)
