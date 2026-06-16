@@ -2,8 +2,8 @@ import { GoogleGenAI } from '@google/genai';
 import { getGeminiKey } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
 import { createGoal, updateMilestone, getActiveGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
-import { updateDailyMetrics } from './metrics.service.js';
-import { openResource } from './osManager.service.js';
+import { updateDailyMetrics, getAllDailyMetrics } from './metrics.service.js';
+import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
 import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
 import { logToDiscord } from './logger.service.js';
@@ -152,12 +152,20 @@ Filter every career-related response through this question: "How does this move 
                 }
             },
             {
+                name: "getAllDailyMetrics",
+                description: "Fetches all historical daily metrics logs including habits, mood, energy, and core focus. Use this when the user asks to see past logs or daily metrics history.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {}
+                }
+            },
+            {
                 name: "openResource",
-                description: "Opens a desktop application or resource on the user's computer. Call this whenever the user asks to open an app like Chrome, VSCode, Spotify, etc.",
+                description: "Opens a desktop application or a specific website on the user's computer. Call this whenever the user asks to open an app (e.g. 'chrome', 'vscode', 'spotify') or a website (e.g. 'youtube', 'google'). If it is a website, you MUST pass a fully qualified https:// URL.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
-                        resourceName: { type: "STRING", description: "The name of the application to open, e.g., 'chrome', 'vscode', 'terminal', 'spotify'" }
+                        resourceName: { type: "STRING", description: "The exact application name, OR the full https:// URL to open." }
                     },
                     required: ["resourceName"]
                 }
@@ -273,9 +281,13 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus);
                     toolResult = { success: true, message: `Daily metrics updated.` };
                 }
+                else if (call.name === "getAllDailyMetrics") {
+                    const metrics = await getAllDailyMetrics();
+                    toolResult = { success: true, dailyMetrics: metrics };
+                }
                 else if (call.name === 'openResource') {
                     const args = call.args;
-                    const result = await openResource(args.resourceName);
+                    const result = await openApplications(args.resourceName);
 
                     toolResult = result;
                 }

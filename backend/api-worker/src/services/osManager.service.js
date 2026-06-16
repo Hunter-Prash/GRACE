@@ -1,6 +1,5 @@
 import { exec } from "child_process";
 
-
 // The Translation Layer: Messy human names -> Exact Windows executables
 const appDictionary = {
     // Browsers
@@ -34,9 +33,7 @@ const appDictionary = {
     "epic games launcher": "com.epicgames.launcher://"
 };
 
-
-
-export const openResource = (resourceName) => {
+const openNativeApp = (resourceName) => {
     return new Promise((resolve, reject) => {
         const executable = appDictionary[resourceName.toLowerCase().trim()];
         console.log(`Attempting to open: ${executable}`);
@@ -51,4 +48,31 @@ export const openResource = (resourceName) => {
             return resolve({ success: true, message: `Opened ${resourceName}` });
         });
     });
+}
+
+
+const openWebsite = (url) => {
+    return new Promise((resolve, reject) => {
+        console.log(`Attempting to open website: ${url}`);
+        // Windows 'start' can open URLs in the default browser natively
+        exec(`start "" "${url}"`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`exec error: ${error}`);
+                return reject({ success: false, error: error.message });
+            }
+            console.log(`Successfully opened website ${url}`);
+            return resolve({ success: true, message: `Opened website: ${url}` });
+        });
+    });
+}
+
+export const openApplications = async (resourceName) => {
+    // If the string starts with http or www, Grace correctly formatted it as a URL
+    if (resourceName.startsWith("http") || resourceName.startsWith("www") || resourceName.startsWith("https")) {
+        return openWebsite(resourceName);
+    }
+    // Otherwise, treat it as a native desktop application
+    else {
+        return openNativeApp(resourceName);
+    }
 }

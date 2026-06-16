@@ -1,5 +1,7 @@
 import time
 import math
+import os
+import GPUtil
 import psutil
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame, QTabWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -554,13 +556,21 @@ class GraceHUD(QMainWindow):
 
     def _tick_stats(self):
         self.bar_cpu.setValue(psutil.cpu_percent())
-        self.bar_ram.setValue(psutil.virtual_memory().percent)
+        
+        # Revert back to tracking total system RAM so it matches Windows Task Manager exactly
+        try:
+            self.bar_ram.setValue(int(psutil.virtual_memory().percent))
+        except Exception as e:
+            print("RAM STAT ERROR:", e)
+            self.bar_ram.setValue(0)
+            
         try:
             gpus = GPUtil.getGPUs()
             if gpus:
-                self.bar_gpu.setValue(gpus[0].load * 100)
-                self.bar_vram.setValue(gpus[0].memoryUtil * 100)
-        except Exception:
+                self.bar_gpu.setValue(int(gpus[0].load * 100))
+                self.bar_vram.setValue(int(gpus[0].memoryUtil * 100))
+        except Exception as e:
+            print("GPU STAT ERROR:", e)
             pass
 
     def _tick_wave(self):

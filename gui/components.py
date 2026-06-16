@@ -2,7 +2,7 @@ import os
 import math
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QRect, QPoint
 from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -474,9 +474,9 @@ class StatusRing(QWidget):
 class ChatBubble(QFrame):
     def __init__(self, speaker, text, parent=None):
         super().__init__(parent)
-        is_user = speaker == "YOU"
+        self.is_user = speaker == "YOU"
         
-        if is_user:
+        if self.is_user:
             color = CYAN
             bg = "rgba(0, 212, 255, 0.07)"
             border_color = "rgba(0, 212, 255, 0.2)"
@@ -519,6 +519,12 @@ class ChatBubble(QFrame):
         
         self.color = color
         
+        if not self.is_user:
+            self._scan_pos = -0.2
+            self.scan_timer = QTimer(self)
+            self.scan_timer.timeout.connect(self._tick_scan)
+            self.scan_timer.start(40)
+            
         # --- FADE IN ANIMATION ---
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self.opacity_effect)
@@ -532,12 +538,35 @@ class ChatBubble(QFrame):
         # --- TYPING EFFECT ---
         self.full_text = text
         self.lbl_txt = lbl_txt
-        if not is_user:
+        if not self.is_user:
             self.lbl_txt.setText("")
             self.type_idx = 0
             self.type_timer = QTimer(self)
             self.type_timer.timeout.connect(self._type_next_char)
             self.type_timer.start(10)  # Type very fast (10ms per loop)
+            
+    def _tick_scan(self):
+        self._scan_pos += 0.016
+        if self._scan_pos > 1.2:
+            self._scan_pos = -0.2
+        self.update()
+        
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if hasattr(self, 'is_user') and not self.is_user:
+            p = QPainter(self)
+            h = self.height()
+            w = self.width()
+            y = int(self._scan_pos * h)
+            beam_h = max(30, h // 2)
+            
+            grad = QLinearGradient(0, y - beam_h//2, 0, y + beam_h//2)
+            grad.setColorAt(0.0, QColor(0,0,0,0))
+            grad.setColorAt(0.5, parse_color(self.color, 12))
+            grad.setColorAt(1.0, QColor(0,0,0,0))
+            
+            p.fillRect(0, y - beam_h//2, w, beam_h, grad)
+            p.fillRect(0, y, w, 1, parse_color(self.color, 25))
             
     def _type_next_char(self):
         if self.type_idx < len(self.full_text):
@@ -823,7 +852,7 @@ class ContextSaturationRing(QWidget):
         p.drawText(tx, cy + 18, "CONTEXT")
 
 # ──────────────────────────────────────────
-# MATRIX RAIN STREAMER
+# ANIMATED SIDE PANE (API QUOTA CAROUSEL)
 # ──────────────────────────────────────────
 import random
 

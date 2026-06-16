@@ -7,8 +7,9 @@ import numpy as np
 import requests
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
+IST = timezone(timedelta(hours=5, minutes=30))
 from core.config import STATE_IDLE, STATE_LISTENING, STATE_PROCESSING, STATE_SPEAKING, CHUNK_SIZE
 from core.audio import (
     mic_callback, speaker_callback, mic_queue, oww_model,
@@ -48,6 +49,12 @@ async def pipeline_async(hud):
         init_biometrics()
     except Exception as e:
         print(f"Failed to initialize biometrics: {e}")
+        
+    import gc
+    import torch
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
         
     from core.audio import oww_model
 
