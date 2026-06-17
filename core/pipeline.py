@@ -48,7 +48,7 @@ def rag_monitor_thread(hud):
     """Background thread to fetch RAG and DB stats from the backend every 15 seconds."""
     while True:
         try:
-            resp = requests.get(f"{API_STATE['url']}/api/rag/stats", timeout=3.0)
+            resp = requests.get(f"{API_STATE['url']}/api/rag/stats", timeout=10.0)
             if resp.status_code == 200:
                 hud.sig_rag_stats.emit(resp.json())
         except Exception:
@@ -99,7 +99,11 @@ async def pipeline_async(hud):
             last_grace_text = None
             for msg in db_history:
                 speaker = "YOU" if msg.get("role") == "user" else "GRACE"
-                text = msg.get("parts", [{"text": ""}])[0].get("text", "")
+                text = ""
+                if "parts" in msg and len(msg["parts"]) > 0:
+                    text = msg["parts"][0].get("text", "")
+                else:
+                    text = msg.get("text", "")
                 hud.add_message(speaker, text)
                 if speaker == "GRACE":
                     last_grace_text = text
@@ -180,6 +184,7 @@ async def pipeline_async(hud):
     hud.sig_clear_dynamo.connect(lambda: cmd_queue.put("CLEAR_DYNAMO"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_clear_pinecone.connect(lambda: cmd_queue.put("CLEAR_PINECONE"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_env_toggle.connect(_on_env_toggle, type=Qt.ConnectionType.DirectConnection)
+    hud.sig_env_toggle.connect(lambda m: cmd_queue.put("RELOAD_HISTORY"), type=Qt.ConnectionType.DirectConnection)
     
     # 3-second rolling buffer for speaker verification (approx 40 chunks if 1280 chunk_size)
     audio_buffer = deque(maxlen=40)
@@ -214,13 +219,40 @@ async def pipeline_async(hud):
                     try:
                         resp = requests.delete(f"{API_STATE['url']}/api/history/default", timeout=5)
                         if resp.status_code == 200:
-                            hud.clear_chat_ui()
-                            hud.add_message("GRACE", "DynamoDB Short-Term Context erased. Starting fresh.")
-                            hud.sig_context_saturation.emit(0)
-                        else:
-                            hud.add_message("GRACE", "Failed to clear DynamoDB context.")
+                            hud.add_message("GRACE", "Short-term memory wiped successfully.")
+                            hud.sig_clear_context.emit()
                     except Exception as e:
-                        hud.add_message("GRACE", f"Error connecting to backend: {e}")
+                        hud.add_message("GRACE", f"Failed to clear DynamoDB: {e}")
+                    continue
+                elif sys_cmd == "RELOAD_HISTORY":
+                    hud.sig_clear_context.emit()
+                    hud.add_message("GRACE", f"Connecting to {API_STATE['mode']} Backend...")
+                    try:
+                        def fetch_history():
+                            return requests.get(f"{API_STATE['url']}/api/history/default", timeout=5).json()
+                        db_response = await asyncio.to_thread(fetch_history)
+                        if isinstance(db_response, dict) and "history" in db_response:
+                            db_history = db_response.get("history", [])
+                            hud.sig_db_latency.emit(db_response.get("dbLatencyMs", 0))
+                            hud.sig_context_saturation.emit(db_response.get("dbContextItemsCount", len(db_history)))
+                        elif isinstance(db_response, list):
+                            db_history = db_response
+                        else:
+                            db_history = []
+                            
+                        if isinstance(db_history, list):
+                            hud._loading_history = True
+                            for msg in db_history:
+                                role = "YOU" if msg.get("role") == "user" else "GRACE"
+                                text = ""
+                                if "parts" in msg and len(msg["parts"]) > 0:
+                                    text = msg["parts"][0].get("text", "")
+                                else:
+                                    text = msg.get("text", "")
+                                hud.add_message(role, text)
+                            hud._loading_history = False
+                    except Exception as e:
+                        hud.add_message("GRACE", f"Failed to fetch history: {e}")
                     continue
                 elif sys_cmd == "CLEAR_PINECONE":
                     try:
@@ -314,6 +346,27 @@ async def pipeline_async(hud):
                     map_data = response.get("mapData")
                     if map_data:
                         hud.sig_map_update.emit(map_data)
+                        
+                    client_commands = response.get("clientCommands", [])
+                    for cmd in client_commands:
+                        if cmd.get("type") == "openResource":
+                            resource_name = cmd.get("resourceName", "")
+                            import os
+                            app_dictionary = {
+                                "chrome": "chrome", "google chrome": "chrome", "edge": "msedge",
+                                "brave": "brave", "vscode": "code", "visual studio code": "code",
+                                "terminal": "wt", "command prompt": "cmd", "word": "winword",
+                                "excel": "excel", "powerpoint": "powerpnt", "calculator": "calc.exe",
+                                "notepad": "notepad", "spotify": "spotify:", "vlc": "vlc",
+                                "steam": "steam://", "epic": "com.epicgames.launcher://"
+                            }
+                            if resource_name.startswith("http"):
+                                import webbrowser
+                                webbrowser.open(resource_name)
+                            else:
+                                exe = app_dictionary.get(resource_name.lower().strip())
+                                if exe:
+                                    os.system(f'start "" "{exe}"')
                     
                     # Track metrics and costs
                     req_in = response.get("inputTokens", 0)

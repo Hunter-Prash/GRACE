@@ -264,8 +264,7 @@ Filter every career-related response through this question: "How does this move 
 
     const toolsUsed = [];
     let mapData = null;
-
-
+    const clientCommands = [];
 
     while (response.functionCalls && response.functionCalls.length > 0) {
         const functionResponses = []; // Array to hold all results
@@ -309,9 +308,8 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 }
                 else if (call.name === 'openResource') {
                     const args = call.args;
-                    const result = await openApplications(args.resourceName);
-
-                    toolResult = result;
+                    clientCommands.push({ type: 'openResource', resourceName: args.resourceName });
+                    toolResult = { success: true, message: `Delegated command to user's local operating system to open ${args.resourceName}` };
                 }
                 else if (call.name === 'getActiveGoals') {
                     const goals = await getActiveGoals();
@@ -388,6 +386,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         dbLatencyMs,
         dbContextItemsCount,
         toolsUsed,
-        mapData
+        mapData,
+        clientCommands
     };
 }

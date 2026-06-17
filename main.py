@@ -21,7 +21,42 @@ qInstallMessageHandler(_qt_msg_handler)
 
 load_dotenv(os.path.join("backend", ".env"))
 
+import subprocess
+import atexit
+
+node_process = None
+
+def start_backend():
+    global node_process
+    backend_dir = os.path.join(os.path.dirname(__file__), "backend", "api-worker")
+    if os.path.exists(os.path.join(backend_dir, "local-server.js")):
+        try:
+            print("[SYSTEM] Starting local Node.js backend...")
+            flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            node_process = subprocess.Popen(
+                ["node", "local-server.js"],
+                cwd=backend_dir,
+                creationflags=flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            print(f"[SYSTEM] Failed to start local Node.js backend: {e}")
+
+def stop_backend():
+    global node_process
+    if node_process:
+        print("[SYSTEM] Shutting down local Node.js backend...")
+        node_process.terminate()
+        try:
+            node_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            node_process.kill()
+
+atexit.register(stop_backend)
+
 def main():
+    start_backend()
     app = QApplication(sys.argv)
     hud = GraceHUD()
     hud.show()

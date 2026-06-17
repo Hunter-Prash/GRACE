@@ -484,6 +484,7 @@ class GraceHUD(QMainWindow):
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
         self.sig_rag_stats.connect(self._on_rag_stats)
+        self.sig_clear_context.connect(self.clear_chat_ui)
         self.sig_show_briefing_panel.connect(self.briefing_pane.slide_in)
         self.btn_shutdown.clicked.connect(self.close)
         self.btn_train.clicked.connect(self._open_enrollment)
