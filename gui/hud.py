@@ -28,6 +28,7 @@ class GraceHUD(QMainWindow):
     sig_clear_context = pyqtSignal()
     sig_map_update  = pyqtSignal(dict)
     sig_show_briefing_panel = pyqtSignal(dict)
+    sig_env_toggle = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -416,13 +417,16 @@ class GraceHUD(QMainWindow):
         
         self.btn_sleep    = CyberButton("SLEEP", CYAN)
         self.btn_train    = CyberButton("TRAIN VOICE", GREEN)
+        self.btn_env      = CyberButton("ENV: LOCAL", GREEN)
         self.btn_api_quota = CyberButton("API QUOTA", AMBER)
         self.btn_shutdown = CyberButton("SHUTDOWN", PINK)
         
         self.btn_api_quota.clicked.connect(self.api_pane.toggle)
+        self.btn_env.clicked.connect(self._prompt_env_toggle)
         
         ac_lay.addWidget(self.btn_sleep)
         ac_lay.addWidget(self.btn_train)
+        ac_lay.addWidget(self.btn_env)
         ac_lay.addWidget(self.btn_api_quota)
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
@@ -722,6 +726,16 @@ class GraceHUD(QMainWindow):
         dlg = DangerConfirmDialog("Are you sure you want to PERMANENTLY erase ALL long-term memories from Pinecone? This action CANNOT BE UNDONE.", self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.sig_clear_pinecone.emit()
+            
+    def _prompt_env_toggle(self):
+        if "LOCAL" in self.btn_env.text():
+            self.btn_env.setText("ENV: CLOUD")
+            self.btn_env.set_color(AMBER)
+            self.sig_env_toggle.emit("CLOUD")
+        else:
+            self.btn_env.setText("ENV: LOCAL")
+            self.btn_env.set_color(GREEN)
+            self.sig_env_toggle.emit("LOCAL")
 
     def show_toaster(self, message):
         self.toaster = ToasterMessage(message, self)

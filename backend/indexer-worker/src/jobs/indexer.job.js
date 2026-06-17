@@ -50,7 +50,7 @@ Write a comprehensive, dense paragraph summarizing all the concrete facts, life 
 Completely ignore small talk, greetings, filler words, and routine task outputs. 
 Do NOT use bullet points. Write a continuous narrative summary.
 CRITICAL INSTRUCTION 1: Include the current date [${todayIST}] contextually if recording new events.
-CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, text snippets, or news articles pulled from the internet, COMPLETELY IGNORE THEM. Do NOT summarize or index web search content. Only index personal facts and user-specific data.
+CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, text snippets, news articles, file contents, code blocks, or directory listings (e.g. from local file system tools), COMPLETELY IGNORE THEM. Do NOT summarize or index web search content or local file outputs. Only index personal facts, goals, and user-specific data.
     `;
 
     for (let i = 0; i < rawBatches.length; i++) {

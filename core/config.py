@@ -38,3 +38,8 @@ STATE_IDLE       = "IDLE"
 STATE_LISTENING  = "LISTENING"
 STATE_PROCESSING = "PROCESSING"
 STATE_SPEAKING   = "SPEAKING"
+
+# API ENDPOINTS
+LOCAL_API_URL = "http://localhost:3000"
+CLOUD_API_URL = "https://your-api-gateway-url.amazonaws.com" # Override via CLOUD_API_URL env var
+API_STATE = {"url": LOCAL_API_URL, "mode": "LOCAL"}

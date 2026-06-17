@@ -626,9 +626,15 @@ class CyberButton(QPushButton):
         self.setText(text)
         self.setFont(mono(9, True))
         self.setFixedHeight(30)
+        self.set_color(color)
         
-        border_color = "rgba(0, 212, 255, 0.2)" if color == CYAN else "rgba(255, 45, 120, 0.2)"
-        hover_bg = "rgba(0, 212, 255, 0.1)" if color == CYAN else "rgba(255, 45, 120, 0.1)"
+    def set_color(self, color):
+        self.color = color
+        border_color = "rgba(0, 212, 255, 0.2)" if color == CYAN else f"rgba(255, 255, 255, 0.2)"
+        hover_bg = "rgba(0, 212, 255, 0.1)" if color == CYAN else f"rgba(255, 255, 255, 0.1)"
+        if color == PINK: border_color = "rgba(255, 45, 120, 0.2)"; hover_bg = "rgba(255, 45, 120, 0.1)"
+        if color == GREEN: border_color = "rgba(0, 255, 136, 0.2)"; hover_bg = "rgba(0, 255, 136, 0.1)"
+        if color == AMBER: border_color = "rgba(255, 170, 0, 0.2)"; hover_bg = "rgba(255, 170, 0, 0.1)"
         
         self.setStyleSheet(f"""
             QPushButton {{

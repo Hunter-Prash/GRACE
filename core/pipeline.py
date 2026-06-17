@@ -10,7 +10,19 @@ import os
 from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
-from core.config import STATE_IDLE, STATE_LISTENING, STATE_PROCESSING, STATE_SPEAKING, CHUNK_SIZE
+from core.config import (
+    STATE_IDLE, STATE_LISTENING, STATE_PROCESSING, STATE_SPEAKING, CHUNK_SIZE,
+    API_STATE, LOCAL_API_URL, CLOUD_API_URL
+)
+
+def _on_env_toggle(mode):
+    if mode == "CLOUD":
+        API_STATE["mode"] = "CLOUD"
+        API_STATE["url"] = os.environ.get("CLOUD_API_URL", CLOUD_API_URL)
+    else:
+        API_STATE["mode"] = "LOCAL"
+        API_STATE["url"] = LOCAL_API_URL
+
 from core.audio import (
     mic_callback, speaker_callback, mic_queue, oww_model,
     run_live_vad_session, synthesize_speech, play_audio_sync, play_audio_with_interruption, init_audio_models
@@ -36,7 +48,7 @@ def rag_monitor_thread(hud):
     """Background thread to fetch RAG and DB stats from the backend every 15 seconds."""
     while True:
         try:
-            resp = requests.get("http://localhost:3000/api/rag/stats", timeout=3.0)
+            resp = requests.get(f"{API_STATE['url']}/api/rag/stats", timeout=3.0)
             if resp.status_code == 200:
                 hud.sig_rag_stats.emit(resp.json())
         except Exception:
@@ -71,7 +83,7 @@ async def pipeline_async(hud):
     
     try:
         def fetch_history():
-            return requests.get("http://localhost:3000/api/history/default", timeout=5).json()
+            return requests.get(f"{API_STATE['url']}/api/history/default", timeout=5).json()
         db_response = await asyncio.to_thread(fetch_history)
         if isinstance(db_response, dict) and "history" in db_response:
             db_history = db_response.get("history", [])
@@ -120,7 +132,7 @@ async def pipeline_async(hud):
             # 1. Fetch raw goals data from backend for the UI Side Panel
             def fetch_goals():
                 try:
-                    return requests.get("http://localhost:3000/api/goals/active", timeout=5).json()
+                    return requests.get(f"{API_STATE['url']}/api/goals/active", timeout=5).json()
                 except Exception:
                     return None
                     
@@ -167,6 +179,7 @@ async def pipeline_async(hud):
     hud.sig_force_sleep.connect(lambda: cmd_queue.put("SLEEP"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_clear_dynamo.connect(lambda: cmd_queue.put("CLEAR_DYNAMO"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_clear_pinecone.connect(lambda: cmd_queue.put("CLEAR_PINECONE"), type=Qt.ConnectionType.DirectConnection)
+    hud.sig_env_toggle.connect(_on_env_toggle, type=Qt.ConnectionType.DirectConnection)
     
     # 3-second rolling buffer for speaker verification (approx 40 chunks if 1280 chunk_size)
     audio_buffer = deque(maxlen=40)
@@ -199,7 +212,7 @@ async def pipeline_async(hud):
                     continue
                 elif sys_cmd == "CLEAR_DYNAMO":
                     try:
-                        resp = requests.delete("http://localhost:3000/api/history/default", timeout=5)
+                        resp = requests.delete(f"{API_STATE['url']}/api/history/default", timeout=5)
                         if resp.status_code == 200:
                             hud.clear_chat_ui()
                             hud.add_message("GRACE", "DynamoDB Short-Term Context erased. Starting fresh.")
@@ -211,7 +224,7 @@ async def pipeline_async(hud):
                     continue
                 elif sys_cmd == "CLEAR_PINECONE":
                     try:
-                        resp = requests.delete("http://localhost:3000/api/pinecone", timeout=5)
+                        resp = requests.delete(f"{API_STATE['url']}/api/pinecone", timeout=5)
                         if resp.status_code == 200:
                             hud.add_message("GRACE", "Pinecone Long-Term Context completely wiped.")
                         else:
@@ -287,7 +300,7 @@ async def pipeline_async(hud):
 
                 try:
                     def make_api_call(text):
-                        return requests.post("http://localhost:3000/api/chat", json={"text": text, "sessionId": "default"}, timeout=30).json()
+                        return requests.post(f"{API_STATE['url']}/api/chat", json={"text": text, "sessionId": "default"}, timeout=30).json()
 
                     response = await asyncio.to_thread(make_api_call, user_cmd)
                     
