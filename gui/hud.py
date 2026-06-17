@@ -36,6 +36,7 @@ class GraceHUD(QMainWindow):
         self.session_start = time.time()
         self.latest_bubble = None
         self.bubble_count  = 0
+        self._loading_history = False
 
         self.setStyleSheet(f"""
             QMainWindow, QWidget#central_widget {{
@@ -663,11 +664,27 @@ class GraceHUD(QMainWindow):
             self.lbl_queries.setText(str(self.bubble_count))
             self.api_pane.update_usage(self.bubble_count)
             
-        QTimer.singleShot(50, self._scroll_bottom)
+        # Only auto-scroll if we're not bulk-loading history
+        if not self._loading_history:
+            QTimer.singleShot(50, self._smart_scroll)
+
+    def _smart_scroll(self):
+        """Only scroll to bottom if user is already near the bottom (within 60px).
+        This prevents yanking the user back down when they've scrolled up to re-read."""
+        sb = self.scroll_area.verticalScrollBar()
+        near_bottom = (sb.maximum() - sb.value()) < 60
+        if near_bottom:
+            sb.setValue(sb.maximum())
 
     def _scroll_bottom(self):
+        """Force scroll to absolute bottom (used after history load)."""
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def finish_history_load(self):
+        """Called by pipeline after all history bubbles are added."""
+        self._loading_history = False
+        QTimer.singleShot(100, self._scroll_bottom)
 
     def clear_chat_ui(self):
         while self.chat_layout.count():

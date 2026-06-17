@@ -83,6 +83,7 @@ async def pipeline_async(hud):
             db_history = []
             
         if isinstance(db_history, list):
+            hud._loading_history = True
             last_grace_text = None
             for msg in db_history:
                 speaker = "YOU" if msg.get("role") == "user" else "GRACE"
@@ -90,6 +91,8 @@ async def pipeline_async(hud):
                 hud.add_message(speaker, text)
                 if speaker == "GRACE":
                     last_grace_text = text
+            
+            hud.finish_history_load()
             
             if last_grace_text:
                 # Pre-generate audio for the very last message in history so you can replay it

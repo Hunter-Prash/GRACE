@@ -49,7 +49,8 @@ You are a memory archivist for Grace, a Life OS.
 Write a comprehensive, dense paragraph summarizing all the concrete facts, life events, decisions, and preferences from the NEW TRANSCRIPT.
 Completely ignore small talk, greetings, filler words, and routine task outputs. 
 Do NOT use bullet points. Write a continuous narrative summary.
-CRITICAL INSTRUCTION: Include the current date [${todayIST}] contextually if recording new events.
+CRITICAL INSTRUCTION 1: Include the current date [${todayIST}] contextually if recording new events.
+CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, text snippets, or news articles pulled from the internet, COMPLETELY IGNORE THEM. Do NOT summarize or index web search content. Only index personal facts and user-specific data.
     `;
 
     for (let i = 0; i < rawBatches.length; i++) {

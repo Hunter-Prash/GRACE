@@ -7,6 +7,8 @@ import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
 import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
 import { logToDiscord } from './logger.service.js';
+import { searchWeb } from './webSearch.service.js';
+import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -42,11 +44,14 @@ export function initLlmClient() {
 
 export async function processChat(sessionId, userText) {
     if (!aiClient) initLlmClient();
+    await initMcpClient();
 
     const dbStart = performance.now();
-    const dbHistory = await loadChatHistory(sessionId, 50);
-
-    const ragContext = await getEmbedding(userText, 5);
+    // Run DynamoDB history load and Pinecone RAG query in PARALLEL — they are independent
+    const [dbHistory, ragContext] = await Promise.all([
+        loadChatHistory(sessionId, 50),
+        getEmbedding(userText, 5)
+    ]);
 
 
     let memoryContextString = "";
@@ -223,9 +228,26 @@ Filter every career-related response through this question: "How does this move 
                     },
                     required: ["query"]
                 }
+            },
+            {
+                name: "searchWeb",
+                description: "Performs a live web search using DuckDuckGo and returns text snippets of the top results. Use this whenever the user asks for real-time information, news, current events, factual lookups, or asks you to search the web.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        query: { type: "STRING", description: "The precise search query to look up on the web" }
+                    },
+                    required: ["query"]
+                }
             }
         ]
     }];
+
+    // Inject dynamic MCP tools into Gemini's tool array
+    const mcpTools = getMcpTools();
+    if (mcpTools && mcpTools.length > 0) {
+        tools[0].functionDeclarations.push(...mcpTools);
+    }
 
     // Initialize chat with tools
 
@@ -323,6 +345,15 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const places = await getNearbyPlaces(args.query);
                     toolResult = { success: true, places: places };
                     mapData = { type: 'places', query: args.query, places: places };
+                }
+                else if (call.name === 'searchWeb') {
+                    const snippets = await searchWeb(call.args.query);
+                    toolResult = { success: true, results: snippets };
+                }
+                else {
+                    // Assume it's an MCP tool if it's not a hardcoded local tool
+                    const mcpResult = await callMcpTool(call.name, call.args);
+                    toolResult = { success: true, result: mcpResult };
                 }
             } catch (e) {
                 console.error(`Tool execution failed: ${e.message}`);
