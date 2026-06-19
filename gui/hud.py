@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QPen, QFont
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -27,6 +27,7 @@ class GraceHUD(QMainWindow):
     sig_alert_toaster = pyqtSignal(str)
     sig_clear_context = pyqtSignal()
     sig_map_update  = pyqtSignal(dict)
+    sig_search_update = pyqtSignal(dict)
     sig_show_briefing_panel = pyqtSignal(dict)
     sig_env_toggle = pyqtSignal(str)
 
@@ -37,7 +38,9 @@ class GraceHUD(QMainWindow):
         self.session_start = time.time()
         self.latest_bubble = None
         self.bubble_count  = 0
+        self.metrics_pane = None
         self._loading_history = False
+        self.search_windows = [] # Keep references to prevent GC
 
         self.setStyleSheet(f"""
             QMainWindow, QWidget#central_widget {{
@@ -480,6 +483,7 @@ class GraceHUD(QMainWindow):
         self.sig_wave.connect(self.audio_monitor.update_bars)
         self.sig_wave.connect(self.small_wave.update_bars)
         self.sig_map_update.connect(self.map_pane.process_map_data)
+        self.sig_search_update.connect(self._show_search_hologram)
         self.map_pane.sig_data_ready.connect(lambda: self.map_tab.set_glow(True))
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
@@ -735,8 +739,20 @@ class GraceHUD(QMainWindow):
             self.sig_env_toggle.emit("CLOUD")
         else:
             self.btn_env.setText("ENV: LOCAL")
-            self.btn_env.set_color(GREEN)
+            self.btn_env.glow_color = GREEN
+            self.btn_env.update()
             self.sig_env_toggle.emit("LOCAL")
+
+    def _show_search_hologram(self, search_data):
+        print(f"[DEBUG] _show_search_hologram TRIGGERED! Data keys: {list(search_data.keys())}", flush=True)
+        try:
+            hw = HoloSearchWindow(search_data)
+            self.search_windows.append(hw)
+            hw.finished.connect(lambda: self.search_windows.remove(hw) if hw in self.search_windows else None)
+            hw.show()
+            print("[DEBUG] HoloSearchWindow instantiated and show() called successfully.", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] ERROR in _show_search_hologram: {e}", flush=True)
 
     def show_toaster(self, message):
         self.toaster = ToasterMessage(message, self)

@@ -14,7 +14,7 @@ export async function searchWeb(query) {
                 query: query,
                 search_depth: "basic",
                 include_answer: false,
-                include_images: false,
+                include_images: true,
                 include_raw_content: false,
                 max_results: 5
             })
@@ -43,7 +43,14 @@ export async function searchWeb(query) {
         }
 
         console.log(`[WEB SEARCH] Found ${searchResults.results.length} highly relevant snippets from Tavily.`);
-        return formattedResults;
+        
+        const visualData = {
+            query: query,
+            results: searchResults.results.map(r => ({ title: r.title, content: r.content, url: r.url })),
+            images: searchResults.images || []
+        };
+        
+        return { formattedResults, visualData };
 
     } catch (error) {
         console.error("[WEB SEARCH ERROR]", error);

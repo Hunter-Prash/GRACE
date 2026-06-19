@@ -1,8 +1,9 @@
 import os
 import math
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QRect, QPoint
-from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient, QPixmap, QGuiApplication
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from PyQt6.QtCore import QUrl, pyqtSignal, Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve, QRectF, QRect, QPoint
+from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog, QScrollArea, QGraphicsDropShadowEffect
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -1481,5 +1482,369 @@ class AnimatedMapPane(QFrame):
             self.map_widget.show_route(data['originCoords'], data['destCoords'])
         elif data.get('type') == 'places':
             self.map_widget.show_places(data['places'])
-        
         self.sig_data_ready.emit()
+
+# ──────────────────────────────────────────
+# HOLOGRAPHIC SEARCH WINDOW (Jarvis Style)
+# ──────────────────────────────────────────
+class HoloSearchWindow(QDialog):
+    def __init__(self, search_data, parent=None):
+        super().__init__(parent)
+        self.search_data = search_data
+        self._drag_pos = None
+        self._card_widgets = []
+        
+        # Frameless, translucent, always-on-top
+        self.setWindowFlags(
+            Qt.WindowType.Dialog |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(640, 720)
+        
+        self.network_manager = QNetworkAccessManager(self)
+        
+        self.init_ui()
+        self.populate_data()
+        
+        # ── Slide-up + Fade-in Animation ──────────────────
+        screen = QGuiApplication.primaryScreen().geometry()
+        self._x_pos = screen.width() // 2 - 320
+        self._end_y  = max(0, screen.height() // 2 - 360)
+        self._start_y = self._end_y + 120
+        
+        self.setGeometry(self._x_pos, self._start_y, 640, 720)
+        self.setWindowOpacity(0.0)
+        
+        self.anim_group = QParallelAnimationGroup(self)
+        
+        op = QPropertyAnimation(self, b"windowOpacity")
+        op.setDuration(550)
+        op.setStartValue(0.0)
+        op.setEndValue(1.0)
+        op.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        pos = QPropertyAnimation(self, b"pos")
+        pos.setDuration(750)
+        pos.setStartValue(QPoint(self._x_pos, self._start_y))
+        pos.setEndValue(QPoint(self._x_pos, self._end_y))
+        pos.setEasingCurve(QEasingCurve.Type.OutBack)
+        
+        self.anim_group.addAnimation(op)
+        self.anim_group.addAnimation(pos)
+        
+        # ── Pulsing border glow timer ──────────────────────
+        self._border_pulse = 0
+        self._pulse_dir = 1
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._tick_pulse)
+        self._pulse_timer.start(40)
+        
+
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.anim_group.start()
+        # ── Sequential card pop-in ─────────────────────────
+        QTimer.singleShot(500, self._animate_cards_in)
+
+    # ── Pulsing border ────────────────────────────────────
+    def _tick_pulse(self):
+        self._border_pulse += self._pulse_dir * 3
+        if self._border_pulse >= 90:
+            self._pulse_dir = -1
+        elif self._border_pulse <= 0:
+            self._pulse_dir = 1
+        alpha = 160 + self._border_pulse
+        color = f"rgba(0, 210, 255, {alpha/255:.2f})"
+        self.bg_frame.setStyleSheet(
+            f"background-color: rgba(5, 12, 20, 0.92);"
+            f"border: 2px solid {color};"
+            f"border-radius: 14px;"
+        )
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        
+        self.bg_frame = QFrame()
+        self.bg_frame.setStyleSheet(
+            f"background-color: rgba(5, 12, 20, 0.92);"
+            f"border: 2px solid {CYAN};"
+            f"border-radius: 14px;"
+        )
+        
+        frame_layout = QVBoxLayout(self.bg_frame)
+        frame_layout.setContentsMargins(18, 14, 18, 18)
+        frame_layout.setSpacing(10)
+        
+        # ── Header bar ────────────────────────────────────
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
+        
+        dot_red   = QLabel("●"); dot_red.setFixedSize(14, 14)
+        dot_amber = QLabel("●"); dot_amber.setFixedSize(14, 14)
+        dot_green = QLabel("●"); dot_green.setFixedSize(14, 14)
+        dot_red.setStyleSheet(f"color: {PINK}; font-size: 10px;")
+        dot_amber.setStyleSheet(f"color: {AMBER}; font-size: 10px;")
+        dot_green.setStyleSheet(f"color: {GREEN}; font-size: 10px;")
+        header_layout.addWidget(dot_red)
+        header_layout.addWidget(dot_amber)
+        header_layout.addWidget(dot_green)
+        
+        title = GlowLabel("🛰  GLOBAL UPLINK  //  SEARCH ANALYSIS", CYAN, 11, True)
+        header_layout.addSpacing(8)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(28, 28)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                color: {PINK}; background: transparent;
+                border: 1px solid {PINK}; border-radius: 6px;
+                font-size: 12px; font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255,60,120,0.25);
+                border: 1px solid {PINK};
+            }}
+        """)
+        btn_close.clicked.connect(self.close_window)
+        header_layout.addWidget(btn_close)
+        frame_layout.addLayout(header_layout)
+        
+        # thin separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {CYAN_DIM}; max-height: 1px; background: {CYAN_DIM};")
+        frame_layout.addWidget(sep)
+        
+        # ── Query label ───────────────────────────────────
+        query = self.search_data.get('query', '')
+        q_label = GlowLabel(f"◉  QUERY: {query.upper()}", AMBER, 9, True)
+        frame_layout.addWidget(q_label)
+        
+        # ── Main Scroll Area ──────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: rgba(0, 0, 0, 0);
+                width: 6px;
+                border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {CYAN};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+        
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setSpacing(12)
+        self.scroll_layout.setContentsMargins(0, 4, 4, 4)
+        
+        scroll.setWidget(self.scroll_content)
+        frame_layout.addWidget(scroll)
+        main_layout.addWidget(self.bg_frame)
+
+    @staticmethod
+    def _clean_text(text):
+        """Strip markdown formatting from snippet text."""
+        import re
+        text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [text](url) -> text
+        text = re.sub(r'#{1,6}\s*', '', text)                   # headings
+        text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)   # bold/italic
+        text = re.sub(r'`([^`]+)`', r'\1', text)                # inline code
+        text = re.sub(r'\n{3,}', '\n\n', text)                  # excess newlines
+        return text.strip()
+
+    def populate_data(self):
+        images = self.search_data.get('images', [])
+        
+        # ── HOLOGRAPHIC IMAGE STRIP ──
+        if images:
+            img_scroll = QScrollArea()
+            img_scroll.setFixedHeight(145)
+            img_scroll.setWidgetResizable(True)
+            img_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            img_scroll.setStyleSheet(f"""
+                QScrollArea {{ border: none; background: transparent; }}
+                QScrollBar:horizontal {{
+                    background: rgba(0,0,0,0); height: 5px; border-radius: 2px;
+                }}
+                QScrollBar::handle:horizontal {{
+                    background: {CYAN}; border-radius: 2px;
+                }}
+                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; }}
+            """)
+            img_container = QWidget()
+            img_container.setStyleSheet("background: transparent;")
+            img_lay = QHBoxLayout(img_container)
+            img_lay.setContentsMargins(0, 0, 0, 0)
+            img_lay.setSpacing(12)
+            
+            for url in images[:6]:
+                lbl = QLabel()
+                lbl.setFixedSize(185, 120)
+                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lbl.setStyleSheet(f"""
+                    QLabel {{
+                        background: rgba(10, 20, 30, 0.6);
+                        border: 1px solid {CYAN_DIM};
+                        border-radius: 8px;
+                    }}
+                """)
+                lbl.setScaledContents(True)
+                
+                # Add a subtle neon glow to images
+                glow = QGraphicsDropShadowEffect(self)
+                glow.setBlurRadius(15)
+                glow.setColor(parse_color(CYAN_DIM))
+                glow.setOffset(0, 0)
+                lbl.setGraphicsEffect(glow)
+                
+                img_lay.addWidget(lbl)
+                self.fetch_image(url, lbl)
+            
+            img_lay.addStretch()
+            img_scroll.setWidget(img_container)
+            self.scroll_layout.addWidget(img_scroll)
+
+        # ── JARVIS STYLE RESULTS CARDS ──
+        results = self.search_data.get('results', [])
+        for res in results[:5]:
+            card = QFrame()
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                                stop:0 rgba(0, 50, 70, 0.4), 
+                                stop:1 rgba(5, 15, 25, 0.8));
+                    border: 1px solid {CYAN_DIM};
+                    border-left: 4px solid {CYAN};
+                    border-radius: 8px;
+                }}
+                QFrame:hover {{
+                    border: 1px solid {CYAN};
+                    border-left: 4px solid {PINK};
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                                stop:0 rgba(0, 70, 100, 0.6), 
+                                stop:1 rgba(5, 25, 45, 0.9));
+                }}
+            """)
+            
+            # Card Glow Effect
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(20)
+            shadow.setColor(parse_color(CYAN))
+            shadow.setOffset(0, 0)
+            card.setGraphicsEffect(shadow)
+            
+            card_lay = QVBoxLayout(card)
+            card_lay.setContentsMargins(18, 14, 18, 14)
+            card_lay.setSpacing(6)
+            
+            # Title
+            title_text = self._clean_text(res.get('title', 'Unknown'))
+            t = QLabel(title_text)
+            t.setFont(sans(10, True))
+            t.setStyleSheet(f"color: #FFFFFF; border: none; background: transparent; font-weight: bold;")
+            t.setWordWrap(True)
+            card_lay.addWidget(t)
+            
+            # URL Link (Clickable)
+            url = res.get('url', '#')
+            link = QLabel(f'<a href="{url}" style="color: {PINK}; text-decoration: none; font-weight: bold;">[ ACCESS SECURE DATALINK ]</a>')
+            link.setFont(mono(8))
+            link.setOpenExternalLinks(True)
+            link.setStyleSheet("border: none; background: transparent;")
+            link.setCursor(Qt.CursorShape.PointingHandCursor)
+            card_lay.addWidget(link)
+            
+            # Snippet Content
+            snippet_text = self._clean_text(res.get('content', ''))
+            if len(snippet_text) > 300:
+                snippet_text = snippet_text[:297] + "..."
+            c = QLabel(snippet_text)
+            c.setFont(sans(9))
+            c.setStyleSheet(f"color: {TEXT_DIM}; border: none; background: transparent; line-height: 1.4;")
+            c.setWordWrap(True)
+            card_lay.addWidget(c)
+            
+            card.hide() # Hidden for pop-in animation
+            self._card_widgets.append(card)
+            self.scroll_layout.addWidget(card)
+            
+        self.scroll_layout.addStretch()
+
+    def _animate_cards_in(self):
+        for i, card in enumerate(self._card_widgets):
+            QTimer.singleShot(i * 120, card.show)
+
+    # ── DRAGGING LOGIC ──
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        
+    def fetch_image(self, url, label):
+        req = QNetworkRequest(QUrl(url))
+        reply = self.network_manager.get(req)
+        # Using a default argument trick to capture reply and label inside lambda
+        reply.finished.connect(lambda r=reply, l=label: self.on_image_fetched(r, l))
+        
+    def on_image_fetched(self, reply, label):
+        if reply.error() == QNetworkReply.NetworkError.NoError:
+            data = reply.readAll()
+            pixmap = QPixmap()
+            pixmap.loadFromData(data)
+            if not pixmap.isNull():
+                label.setPixmap(pixmap)
+            else:
+                label.setText("Invalid Image")
+        else:
+            label.setText("Image Error")
+        reply.deleteLater()
+        
+    def close_window(self):
+        self.anim_group.setDirection(QPropertyAnimation.Direction.Backward)
+        self.anim_group.finished.connect(self.accept)
+        self.anim_group.start()
+
+    # Make frameless window draggable
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+

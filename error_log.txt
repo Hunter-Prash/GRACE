@@ -1,0 +1,5 @@
+Uncaught exception:
+Traceback (most recent call last):
+  File "d:\PERSONAL\GRACE\gui\components.py", line 1550, in showEvent
+    QTimer.singleShot(500, self._animate_cards_in)
+AttributeError: 'HoloSearchWindow' object has no attribute '_animate_cards_in'

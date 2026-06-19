@@ -264,6 +264,7 @@ Filter every career-related response through this question: "How does this move 
 
     const toolsUsed = [];
     let mapData = null;
+    let searchData = null;
     const clientCommands = [];
 
     while (response.functionCalls && response.functionCalls.length > 0) {
@@ -345,8 +346,9 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     mapData = { type: 'places', query: args.query, places: places };
                 }
                 else if (call.name === 'searchWeb') {
-                    const snippets = await searchWeb(call.args.query);
-                    toolResult = { success: true, results: snippets };
+                    const res = await searchWeb(call.args.query);
+                    toolResult = { success: true, results: res.formattedResults };
+                    searchData = res.visualData;
                 }
                 else {
                     // Assume it's an MCP tool if it's not a hardcoded local tool
@@ -387,6 +389,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         dbContextItemsCount,
         toolsUsed,
         mapData,
+        searchData,
         clientCommands
     };
 }

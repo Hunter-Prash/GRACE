@@ -81,7 +81,9 @@ router.post('/chat', async (req, res) => {
             dbContextItemsCount: result.dbContextItemsCount,
             toolsUsed: result.toolsUsed,
             indexerTriggered: indexerTriggered,
-            mapData: result.mapData
+            mapData: result.mapData,
+            searchData: result.searchData,
+            clientCommands: result.clientCommands
         });
 
     } catch (error) {

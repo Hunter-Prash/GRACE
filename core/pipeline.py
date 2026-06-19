@@ -7,6 +7,7 @@ import numpy as np
 import requests
 import json
 import os
+import webbrowser
 from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -347,11 +348,16 @@ async def pipeline_async(hud):
                     if map_data:
                         hud.sig_map_update.emit(map_data)
                         
+                    search_data = response.get("searchData")
+                    print(f"[DEBUG] searchData received: {bool(search_data)}, keys: {list(search_data.keys()) if search_data else 'None'}")
+                    if search_data:
+                        print(f"[DEBUG] Emitting sig_search_update with {len(search_data.get('results', []))} results and {len(search_data.get('images', []))} images")
+                        hud.sig_search_update.emit(search_data)
+                        
                     client_commands = response.get("clientCommands", [])
                     for cmd in client_commands:
                         if cmd.get("type") == "openResource":
                             resource_name = cmd.get("resourceName", "")
-                            import os
                             app_dictionary = {
                                 "chrome": "chrome", "google chrome": "chrome", "edge": "msedge",
                                 "brave": "brave", "vscode": "code", "visual studio code": "code",
@@ -361,7 +367,6 @@ async def pipeline_async(hud):
                                 "steam": "steam://", "epic": "com.epicgames.launcher://"
                             }
                             if resource_name.startswith("http"):
-                                import webbrowser
                                 webbrowser.open(resource_name)
                             else:
                                 exe = app_dictionary.get(resource_name.lower().strip())
