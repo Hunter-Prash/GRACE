@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QPen, QFont
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow
+from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow, CircuitBoardBackground
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -265,6 +265,7 @@ class GraceHUD(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("background: transparent; border: none;")
         
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet("background: transparent;")
@@ -275,7 +276,18 @@ class GraceHUD(QMainWindow):
         
         scroll.setWidget(self.chat_container)
         self.scroll_area = scroll
-        lay.addWidget(scroll, 1)
+        
+        # Overlay container to place animated circuit board behind the transparent scroll area
+        from PyQt6.QtWidgets import QGridLayout
+        overlap_container = QWidget()
+        overlap_lay = QGridLayout(overlap_container)
+        overlap_lay.setContentsMargins(0, 0, 0, 0)
+        
+        self.circuit_bg = CircuitBoardBackground()
+        overlap_lay.addWidget(self.circuit_bg, 0, 0)
+        overlap_lay.addWidget(scroll, 0, 0)
+        
+        lay.addWidget(overlap_container, 1)
 
         # Bottom Awaiting Input Separator & Layout
         div = QFrame()

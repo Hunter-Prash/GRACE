@@ -1,8 +1,8 @@
 import os
 import math
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient, QPixmap, QGuiApplication
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient, QPixmap, QGuiApplication, QPainterPath, QPolygon, QPolygonF, QBrush, QDesktopServices
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PyQt6.QtCore import QUrl, pyqtSignal, Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve, QRectF, QRect, QPoint
+from PyQt6.QtCore import QUrl, pyqtSignal, Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve, QRectF, QRect, QPoint, QPointF
 from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog, QScrollArea, QGraphicsDropShadowEffect
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -1485,6 +1485,150 @@ class AnimatedMapPane(QFrame):
         self.sig_data_ready.emit()
 
 # ──────────────────────────────────────────
+# HOLO SEARCH CUSTOM WIDGETS
+# ──────────────────────────────────────────
+class HoloThumbnail(QWidget):
+    def __init__(self, url, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.setFixedSize(160, 100)
+        self.pixmap = None
+        self._scan_y = 0.0
+        self._scan_dir = 1
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._animate)
+        self.timer.start(30)
+        
+    def set_pixmap(self, pixmap):
+        self.pixmap = pixmap
+        self.update()
+        
+    def _animate(self):
+        pass
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        
+        path = QPainterPath()
+        c = 12
+        path.moveTo(0, 0)
+        path.lineTo(w - c, 0)
+        path.lineTo(w, c)
+        path.lineTo(w, h)
+        path.lineTo(c, h)
+        path.lineTo(0, h - c)
+        path.closeSubpath()
+        
+        painter.setClipPath(path)
+        
+        if self.pixmap:
+            painter.drawPixmap(self.rect(), self.pixmap)
+        else:
+            # Pure dark fallback
+            painter.fillRect(self.rect(), QColor(5, 5, 5, 255))
+            
+        painter.setClipping(False)
+        
+        # Draw thin dim border
+        pen = QPen(parse_color(CYAN_DIM))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+        
+        # Draw bright bottom cyan border glow/scan
+        pen = QPen(parse_color(CYAN))
+        pen.setWidth(3)
+        painter.setPen(pen)
+        painter.drawLine(c, h, w, h)
+
+class HoloCard(QWidget):
+    def __init__(self, title, url, content, is_new=False, parent=None):
+        super().__init__(parent)
+        self.is_new = is_new
+        self.url = url
+        
+        # Setup layout
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(6)
+        
+        # Title (Pink)
+        t_lbl = GlowLabel(title, PINK, 10, True)
+        t_lbl.setWordWrap(True)
+        lay.addWidget(t_lbl)
+        
+        # Source (Cyan)
+        import urllib.parse
+        domain = urllib.parse.urlparse(url).netloc.upper()
+        s_lbl = QLabel(f"VERIFIED SOURCE // {domain}")
+        s_lbl.setFont(mono(8))
+        s_lbl.setStyleSheet(f"color: {CYAN}; border: none; background: transparent;")
+        lay.addWidget(s_lbl)
+        
+        # Snippet
+        c_lbl = QLabel(content)
+        c_lbl.setFont(sans(9))
+        c_lbl.setStyleSheet(f"color: {TEXT_DIM}; border: none; background: transparent; line-height: 1.4;")
+        c_lbl.setWordWrap(True)
+        lay.addWidget(c_lbl)
+        
+        # Link
+        link = QLabel(f'[ ACCESS SECURE DATALINK ]')
+        link.setFont(mono(8))
+        link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
+        link.setCursor(Qt.CursorShape.PointingHandCursor)
+        link.mousePressEvent = lambda e: QDesktopServices.openUrl(QUrl(self.url))
+        lay.addWidget(link)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        
+        path = QPainterPath()
+        c = 16
+        path.moveTo(0, 0)
+        path.lineTo(w - c, 0)
+        path.lineTo(w, c)
+        path.lineTo(w, h)
+        path.lineTo(c, h)
+        path.lineTo(0, h - c)
+        path.closeSubpath()
+        
+        # Background pure black/dark
+        painter.fillPath(path, QColor(8, 8, 12, 240))
+        
+        # Border gradient
+        pen_grad = QLinearGradient(0, 0, w, h)
+        pen_grad.setColorAt(0, parse_color(PINK))
+        pen_grad.setColorAt(0.35, parse_color(CYAN))
+        pen_grad.setColorAt(1, parse_color(CYAN))
+        
+        pen = QPen(pen_grad, 2)
+        painter.setPen(pen)
+        painter.drawPath(path)
+        
+        if self.is_new:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(parse_color(CYAN))
+            tag = QPolygonF([
+                QPointF(w - 40, 0),
+                QPointF(w - c, 0),
+                QPointF(w, c),
+                QPointF(w, 24),
+                QPointF(w - 40, 24)
+            ])
+            painter.drawPolygon(tag)
+            
+            painter.setPen(QColor(0,0,0))
+            painter.setFont(mono(8, True))
+            painter.drawText(QRect(w - 36, 4, 32, 16), Qt.AlignmentFlag.AlignCenter, "NEW")
+
+# ──────────────────────────────────────────
 # HOLOGRAPHIC SEARCH WINDOW (Jarvis Style)
 # ──────────────────────────────────────────
 class HoloSearchWindow(QDialog):
@@ -1533,15 +1677,6 @@ class HoloSearchWindow(QDialog):
         
         self.anim_group.addAnimation(op)
         self.anim_group.addAnimation(pos)
-        
-        # ── Pulsing border glow timer ──────────────────────
-        self._border_pulse = 0
-        self._pulse_dir = 1
-        self._pulse_timer = QTimer(self)
-        self._pulse_timer.timeout.connect(self._tick_pulse)
-        self._pulse_timer.start(40)
-        
-
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1549,30 +1684,15 @@ class HoloSearchWindow(QDialog):
         # ── Sequential card pop-in ─────────────────────────
         QTimer.singleShot(500, self._animate_cards_in)
 
-    # ── Pulsing border ────────────────────────────────────
-    def _tick_pulse(self):
-        self._border_pulse += self._pulse_dir * 3
-        if self._border_pulse >= 90:
-            self._pulse_dir = -1
-        elif self._border_pulse <= 0:
-            self._pulse_dir = 1
-        alpha = 160 + self._border_pulse
-        color = f"rgba(0, 210, 255, {alpha/255:.2f})"
-        self.bg_frame.setStyleSheet(
-            f"background-color: rgba(5, 12, 20, 0.92);"
-            f"border: 2px solid {color};"
-            f"border-radius: 14px;"
-        )
-
     def init_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
         
         self.bg_frame = QFrame()
         self.bg_frame.setStyleSheet(
-            f"background-color: rgba(5, 12, 20, 0.92);"
-            f"border: 2px solid {CYAN};"
-            f"border-radius: 14px;"
+            f"background-color: #030406;"
+            f"border: 1px solid rgba(255, 60, 120, 100);"
+            f"border-radius: 0px;"
         )
         
         frame_layout = QVBoxLayout(self.bg_frame)
@@ -1583,20 +1703,32 @@ class HoloSearchWindow(QDialog):
         header_layout = QHBoxLayout()
         header_layout.setSpacing(8)
         
-        dot_red   = QLabel("●"); dot_red.setFixedSize(14, 14)
-        dot_amber = QLabel("●"); dot_amber.setFixedSize(14, 14)
-        dot_green = QLabel("●"); dot_green.setFixedSize(14, 14)
-        dot_red.setStyleSheet(f"color: {PINK}; font-size: 10px;")
-        dot_amber.setStyleSheet(f"color: {AMBER}; font-size: 10px;")
-        dot_green.setStyleSheet(f"color: {GREEN}; font-size: 10px;")
-        header_layout.addWidget(dot_red)
-        header_layout.addWidget(dot_amber)
-        header_layout.addWidget(dot_green)
+        # Title Area
+        t_lay = QHBoxLayout()
+        t_lay.setContentsMargins(10, 4, 10, 4)
+        icon = GlowLabel("◈", CYAN, 12, True)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setFixedSize(22, 22)
+        icon.setStyleSheet(f"color: {CYAN}; border: 1px solid {CYAN}; border-radius: 11px;")
+        t_lay.addWidget(icon)
+        title = GlowLabel("HOLO-SEARCH", PINK, 11, True)
+        title.setStyleSheet(f"color: {PINK}; letter-spacing: 4px; font-weight: bold; border: none;")
+        t_lay.addWidget(title)
+        header_layout.addLayout(t_lay)
         
-        title = GlowLabel("🛰  GLOBAL UPLINK  //  SEARCH ANALYSIS", CYAN, 11, True)
-        header_layout.addSpacing(8)
-        header_layout.addWidget(title)
         header_layout.addStretch()
+        
+        # Signal Area
+        s_lay = QHBoxLayout()
+        s_lay.setContentsMargins(10, 4, 10, 4)
+        dot = PulsingDot(CYAN, 7)
+        s_lay.addWidget(dot)
+        signal = GlowLabel("SIGNAL: STRONG", CYAN, 9, True)
+        signal.setStyleSheet(f"color: {CYAN}; border: none;")
+        s_lay.addWidget(signal)
+        header_layout.addLayout(s_lay)
+        
+        header_layout.addSpacing(16)
         
         btn_close = QPushButton("✕")
         btn_close.setFixedSize(28, 28)
@@ -1604,7 +1736,7 @@ class HoloSearchWindow(QDialog):
         btn_close.setStyleSheet(f"""
             QPushButton {{
                 color: {PINK}; background: transparent;
-                border: 1px solid {PINK}; border-radius: 6px;
+                border: 1px solid {PINK}; border-radius: 0px;
                 font-size: 12px; font-weight: bold;
             }}
             QPushButton:hover {{
@@ -1616,16 +1748,18 @@ class HoloSearchWindow(QDialog):
         header_layout.addWidget(btn_close)
         frame_layout.addLayout(header_layout)
         
-        # thin separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color: {CYAN_DIM}; max-height: 1px; background: {CYAN_DIM};")
-        frame_layout.addWidget(sep)
+        frame_layout.addSpacing(4)
         
-        # ── Query label ───────────────────────────────────
+        # ── Query label (Box) ───────────────────────────────────
         query = self.search_data.get('query', '')
-        q_label = GlowLabel(f"◉  QUERY: {query.upper()}", AMBER, 9, True)
-        frame_layout.addWidget(q_label)
+        q_frame = QFrame()
+        q_frame.setStyleSheet(f"border: 1px solid {CYAN_DIM}; border-radius: 0px; background: transparent;")
+        q_lay = QHBoxLayout(q_frame)
+        q_lay.setContentsMargins(12, 6, 12, 6)
+        q_lbl = GlowLabel(f"QUERY > {query.lower()}", CYAN, 9, True)
+        q_lbl.setStyleSheet(f"color: {CYAN}; border: none;")
+        q_lay.addWidget(q_lbl)
+        frame_layout.addWidget(q_frame)
         
         # ── Main Scroll Area ──────────────────────────────
         scroll = QScrollArea()
@@ -1661,6 +1795,27 @@ class HoloSearchWindow(QDialog):
         
         scroll.setWidget(self.scroll_content)
         frame_layout.addWidget(scroll)
+        
+        # ── Footer Stats ──────────────────────────────────
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(4, 8, 4, 0)
+        res_count = len(self.search_data.get('results', []))
+        self.lbl_results = GlowLabel(f"RESULTS:  {res_count}", CYAN_DIM, 8, True)
+        
+        import random
+        lat = random.randint(180, 420)
+        self.lbl_latency = GlowLabel(f"LATENCY:  {lat}ms", CYAN_DIM, 8, True)
+        
+        self.lbl_uplink = GlowLabel("UPLINK:  ENCRYPTED", CYAN_DIM, 8, True)
+        
+        footer_layout.addWidget(self.lbl_results)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.lbl_latency)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.lbl_uplink)
+        
+        frame_layout.addLayout(footer_layout)
+        
         main_layout.addWidget(self.bg_frame)
 
     @staticmethod
@@ -1700,27 +1855,16 @@ class HoloSearchWindow(QDialog):
             img_lay.setSpacing(12)
             
             for url in images[:6]:
-                lbl = QLabel()
-                lbl.setFixedSize(185, 120)
-                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lbl.setStyleSheet(f"""
-                    QLabel {{
-                        background: rgba(10, 20, 30, 0.6);
-                        border: 1px solid {CYAN_DIM};
-                        border-radius: 8px;
-                    }}
-                """)
-                lbl.setScaledContents(True)
-                
-                # Add a subtle neon glow to images
+                thumb = HoloThumbnail(url)
+                # Drop shadow on the whole thumbnail widget
                 glow = QGraphicsDropShadowEffect(self)
                 glow.setBlurRadius(15)
                 glow.setColor(parse_color(CYAN_DIM))
                 glow.setOffset(0, 0)
-                lbl.setGraphicsEffect(glow)
+                thumb.setGraphicsEffect(glow)
                 
-                img_lay.addWidget(lbl)
-                self.fetch_image(url, lbl)
+                img_lay.addWidget(thumb)
+                self.fetch_image(url, thumb)
             
             img_lay.addStretch()
             img_scroll.setWidget(img_container)
@@ -1728,69 +1872,33 @@ class HoloSearchWindow(QDialog):
 
         # ── JARVIS STYLE RESULTS CARDS ──
         results = self.search_data.get('results', [])
-        for res in results[:5]:
-            card = QFrame()
-            card.setStyleSheet(f"""
-                QFrame {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                                stop:0 rgba(0, 50, 70, 0.4), 
-                                stop:1 rgba(5, 15, 25, 0.8));
-                    border: 1px solid {CYAN_DIM};
-                    border-left: 4px solid {CYAN};
-                    border-radius: 8px;
-                }}
-                QFrame:hover {{
-                    border: 1px solid {CYAN};
-                    border-left: 4px solid {PINK};
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                                stop:0 rgba(0, 70, 100, 0.6), 
-                                stop:1 rgba(5, 25, 45, 0.9));
-                }}
-            """)
+        for i, res in enumerate(results[:5]):
+            title = self._clean_text(res.get('title', 'Unknown'))
+            url = res.get('url', '#')
+            content = self._clean_text(res.get('content', ''))
+            if len(content) > 300:
+                content = content[:297] + "..."
             
-            # Card Glow Effect
+            is_new = (i == 0) # Only tag the first as NEW for aesthetic
+            
+            card = HoloCard(title, url, content, is_new)
+            
+            # Subtle Drop shadow instead of massive glow
             shadow = QGraphicsDropShadowEffect(self)
-            shadow.setBlurRadius(20)
-            shadow.setColor(parse_color(CYAN))
+            shadow.setBlurRadius(8)
+            shadow.setColor(QColor(255, 60, 120, 40)) # Faint pink shadow
             shadow.setOffset(0, 0)
             card.setGraphicsEffect(shadow)
-            
-            card_lay = QVBoxLayout(card)
-            card_lay.setContentsMargins(18, 14, 18, 14)
-            card_lay.setSpacing(6)
-            
-            # Title
-            title_text = self._clean_text(res.get('title', 'Unknown'))
-            t = QLabel(title_text)
-            t.setFont(sans(10, True))
-            t.setStyleSheet(f"color: #FFFFFF; border: none; background: transparent; font-weight: bold;")
-            t.setWordWrap(True)
-            card_lay.addWidget(t)
-            
-            # URL Link (Clickable)
-            url = res.get('url', '#')
-            link = QLabel(f'<a href="{url}" style="color: {PINK}; text-decoration: none; font-weight: bold;">[ ACCESS SECURE DATALINK ]</a>')
-            link.setFont(mono(8))
-            link.setOpenExternalLinks(True)
-            link.setStyleSheet("border: none; background: transparent;")
-            link.setCursor(Qt.CursorShape.PointingHandCursor)
-            card_lay.addWidget(link)
-            
-            # Snippet Content
-            snippet_text = self._clean_text(res.get('content', ''))
-            if len(snippet_text) > 300:
-                snippet_text = snippet_text[:297] + "..."
-            c = QLabel(snippet_text)
-            c.setFont(sans(9))
-            c.setStyleSheet(f"color: {TEXT_DIM}; border: none; background: transparent; line-height: 1.4;")
-            c.setWordWrap(True)
-            card_lay.addWidget(c)
             
             card.hide() # Hidden for pop-in animation
             self._card_widgets.append(card)
             self.scroll_layout.addWidget(card)
             
         self.scroll_layout.addStretch()
+
+    def _animate_cards_in(self):
+        for i, card in enumerate(self._card_widgets):
+            QTimer.singleShot(i * 120, card.show)
 
     def _animate_cards_in(self):
         for i, card in enumerate(self._card_widgets):
@@ -1812,6 +1920,7 @@ class HoloSearchWindow(QDialog):
         
     def fetch_image(self, url, label):
         req = QNetworkRequest(QUrl(url))
+        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         reply = self.network_manager.get(req)
         # Using a default argument trick to capture reply and label inside lambda
         reply.finished.connect(lambda r=reply, l=label: self.on_image_fetched(r, l))
@@ -1822,11 +1931,16 @@ class HoloSearchWindow(QDialog):
             pixmap = QPixmap()
             pixmap.loadFromData(data)
             if not pixmap.isNull():
-                label.setPixmap(pixmap)
+                if hasattr(label, 'set_pixmap'):
+                    label.set_pixmap(pixmap)
+                else:
+                    label.setPixmap(pixmap)
             else:
-                label.setText("Invalid Image")
+                if hasattr(label, 'setText'):
+                    label.setText("Invalid Image")
         else:
-            label.setText("Image Error")
+            if hasattr(label, 'setText'):
+                label.setText("Image Error")
         reply.deleteLater()
         
     def close_window(self):
@@ -1848,3 +1962,69 @@ class HoloSearchWindow(QDialog):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
+# ──────────────────────────────────────────
+# CIRCUIT BOARD BACKGROUND (Animated Faint Traces)
+# ──────────────────────────────────────────
+class CircuitBoardBackground(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._phase = 0.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._animate)
+        self.timer.start(50)
+        
+    def _animate(self):
+        self._phase += 0.05
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Faint cyan traces
+        pen = QPen(QColor(0, 212, 255, 12)) 
+        pen.setWidth(1)
+        painter.setPen(pen)
+        
+        w = self.width()
+        h = self.height()
+        if w == 0 or h == 0: return
+        
+        # Hardcoded proportional paths for circuit traces
+        lines = [
+            (0.1*w, 0.2*h, 0.3*w, 0.2*h),
+            (0.3*w, 0.2*h, 0.3*w, 0.5*h),
+            (0.3*w, 0.5*h, 0.6*w, 0.5*h),
+            
+            (0.8*w, 0.1*h, 0.8*w, 0.4*h),
+            (0.8*w, 0.4*h, 0.5*w, 0.4*h),
+            (0.5*w, 0.4*h, 0.5*w, 0.8*h),
+            
+            (0.15*w, 0.8*h, 0.35*w, 0.8*h),
+            (0.35*w, 0.8*h, 0.35*w, 0.6*h),
+            
+            (0.9*w, 0.7*h, 0.7*w, 0.7*h),
+            (0.7*w, 0.7*h, 0.7*w, 0.9*h)
+        ]
+        
+        for lx1, ly1, lx2, ly2 in lines:
+            painter.drawLine(int(lx1), int(ly1), int(lx2), int(ly2))
+            
+        # Draw microchips (rectangles)
+        painter.setBrush(QColor(0, 0, 0, 0)) # transparent fill
+        painter.drawRect(int(0.05*w), int(0.15*h), int(0.05*w), int(0.1*h))
+        painter.drawRect(int(0.75*w), int(0.35*h), int(0.08*w), int(0.1*h))
+        painter.drawRect(int(0.45*w), int(0.75*h), int(0.06*w), int(0.06*h))
+        
+        # Draw animated data packets moving along paths
+        packet_color = QColor(0, 212, 255, 40) # Slightly brighter than traces
+        painter.setBrush(packet_color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        for i, (lx1, ly1, lx2, ly2) in enumerate(lines):
+            # smooth back and forth movement using sin
+            t = (math.sin(self._phase + i*1.3) + 1) / 2.0
+            px = lx1 + (lx2 - lx1) * t
+            py = ly1 + (ly2 - ly1) * t
+            painter.drawEllipse(QPoint(int(px), int(py)), 2, 2)

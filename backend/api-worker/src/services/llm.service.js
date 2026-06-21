@@ -9,6 +9,7 @@ import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
 import { logToDiscord } from './logger.service.js';
 import { searchWeb } from './webSearch.service.js';
 import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
+import { getCurrentDateTime } from './datetime.service.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -239,6 +240,16 @@ Filter every career-related response through this question: "How does this move 
                     },
                     required: ["query"]
                 }
+            },
+            {
+                name: "getCurrentDateTime",
+                description: "Gets the exact current date and time in IST (Indian Standard Time). Can also calculate future or past dates by providing an offset in days. Use this whenever the user asks about the current date, time, or asks questions like 'a month from now', 'few days from now', etc.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        offsetDays: { type: "INTEGER", description: "Optional. Number of days to add (positive) or subtract (negative) from the current date." }
+                    }
+                }
             }
         ]
     }];
@@ -349,6 +360,11 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const res = await searchWeb(call.args.query);
                     toolResult = { success: true, results: res.formattedResults };
                     searchData = res.visualData;
+                }
+                else if (call.name === 'getCurrentDateTime') {
+                    const args = call.args || {};
+                    const res = getCurrentDateTime(args.offsetDays || 0);
+                    toolResult = { success: true, datetime: res };
                 }
                 else {
                     // Assume it's an MCP tool if it's not a hardcoded local tool
