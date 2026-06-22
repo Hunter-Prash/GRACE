@@ -50,7 +50,7 @@ export const upsertQuery = async (records) => {
 }
 
 //THE RETRIVER-READING MEMORIES
-export const getEmbedding = async (query, topK = 10) => {
+export const getEmbedding = async (query, topK = 5) => {
     // Search the index
     //this automatically performs vector search on the input query text and returns the top K most similar vectors
     //the results are sorted by similarity score in descending order
@@ -91,7 +91,7 @@ export const clearPineconeMemory = async () => {
             }
             paginationToken = listResponse.pagination?.next;
         } while (paginationToken);
-        
+
         console.log("[Pinecone] All long-term vectors have been deleted.");
     } catch (e) {
         console.error("Error clearing Pinecone memory:", e);

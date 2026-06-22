@@ -1,16 +1,13 @@
 import time
 import math
-import psutil
-import json
 import os
-from datetime import datetime, timezone, timedelta
-
-IST = timezone(timedelta(hours=5, minutes=30))
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy, QTabWidget
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient
+import GPUtil
+import psutil
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame, QTabWidget, QPushButton
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QPainter, QPen, QFont, QShortcut, QKeySequence
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, HexMatrixStream, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage
+from gui.components import ContextPanel, GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow, CircuitBoardBackground
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -30,6 +27,10 @@ class GraceHUD(QMainWindow):
     sig_alert_toaster = pyqtSignal(str)
     sig_clear_context = pyqtSignal()
     sig_map_update  = pyqtSignal(dict)
+    sig_search_update = pyqtSignal(dict)
+    sig_show_briefing_panel = pyqtSignal(dict)
+    sig_env_toggle = pyqtSignal(str)
+    sig_context_scene = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -37,7 +38,11 @@ class GraceHUD(QMainWindow):
         self.setMinimumSize(1100, 660)
         self.session_start = time.time()
         self.latest_bubble = None
+        self.state = "IDLE"
         self.bubble_count  = 0
+        self.metrics_pane = None
+        self._loading_history = False
+        self.search_windows = [] # Keep references to prevent GC
 
         self.setStyleSheet(f"""
             QMainWindow, QWidget#central_widget {{
@@ -49,7 +54,7 @@ class GraceHUD(QMainWindow):
             }}
             QScrollBar:vertical {{
                 background: transparent;
-                width: 4px;
+                width: 8px;
                 margin: 0px;
             }}
             QScrollBar::handle:vertical {{
@@ -71,6 +76,7 @@ class GraceHUD(QMainWindow):
         """)
 
         self._build_ui()
+        QShortcut(QKeySequence("Ctrl+Shift+L"), self).activated.connect(self._toggle_context_panel)
         self._connect_signals()
         self._start_timers()
 
@@ -87,6 +93,7 @@ class GraceHUD(QMainWindow):
 
         self.api_pane = AnimatedSidePane()
         self.map_pane = AnimatedMapPane()
+        self.briefing_pane = DailyBriefingPanel()
         
         self.map_tab = MapToggleTab()
         self.map_tab.clicked.connect(self._on_map_tab_clicked)
@@ -104,6 +111,7 @@ class GraceHUD(QMainWindow):
         body.addWidget(self._right_panel(), 0)
         body.addWidget(self.api_pane, 0)
         body.addWidget(self.map_pane, 0)
+        body.addWidget(self.briefing_pane, 0)
         body.addLayout(tab_lay, 0)
         main.addLayout(body, 1)
 
@@ -248,18 +256,45 @@ class GraceHUD(QMainWindow):
         """)
         
         # Tab 1: CONVERSATION LOG
-        panel = CyberPanel("◈ CONVERSATION LOG", CYAN)
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(12, 16, 12, 12)
+        self.panel_log = CyberPanel("◈ CONVERSATION LOG", CYAN)
+        main_lay = QHBoxLayout(self.panel_log)
+        main_lay.setContentsMargins(12, 24, 12, 12)
+        main_lay.setSpacing(0)
+
+        # Toggle Button
+        self.btn_toggle_context = QPushButton("⛶")
+        self.btn_toggle_context.setFixedSize(22, 22)
+        self.btn_toggle_context.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_context.setStyleSheet(f"""
+            QPushButton {{
+                color: {CYAN};
+                background: transparent;
+                border: 1px solid {BORDER};
+                border-radius: 2px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background: rgba(0, 212, 255, 0.15);
+                border: 1px solid {CYAN};
+            }}
+        """)
+        self.btn_toggle_context.clicked.connect(self._toggle_context_panel)
+        self.panel_log.add_header_widget(self.btn_toggle_context)
+
+        # Left Container
+        self.left_log_container = QWidget()
+        lay = QVBoxLayout(self.left_log_container)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # Context Window Saturation Bar at the very top
-        self.bar_context = TelemetryBar("CONTEXT WINDOW SATURATION", max_val=50, color=CYAN)
+        # Context Window Saturation Arc Ring at the very top
+        self.bar_context = ContextSaturationRing()
         lay.addWidget(self.bar_context)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("background: transparent; border: none;")
         
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet("background: transparent;")
@@ -270,7 +305,18 @@ class GraceHUD(QMainWindow):
         
         scroll.setWidget(self.chat_container)
         self.scroll_area = scroll
-        lay.addWidget(scroll, 1)
+        
+        # Overlay container to place animated circuit board behind the transparent scroll area
+        from PyQt6.QtWidgets import QGridLayout
+        overlap_container = QWidget()
+        overlap_lay = QGridLayout(overlap_container)
+        overlap_lay.setContentsMargins(0, 0, 0, 0)
+        
+        self.circuit_bg = CircuitBoardBackground()
+        overlap_lay.addWidget(self.circuit_bg, 0, 0)
+        overlap_lay.addWidget(scroll, 0, 0)
+        
+        lay.addWidget(overlap_container, 1)
 
         # Bottom Awaiting Input Separator & Layout
         div = QFrame()
@@ -305,9 +351,21 @@ class GraceHUD(QMainWindow):
         bottom_lay.addWidget(self.btn_send)
         
         lay.addWidget(bottom_row)
-
-        tabs.addTab(panel, "LOG")
         
+        # Right Container (ContextPanel)
+        self.context_panel = ContextPanel()
+        
+        main_lay.addWidget(self.left_log_container, 1)
+        main_lay.addWidget(self.context_panel, 0)
+        
+        self.context_anim = QPropertyAnimation(self.context_panel, b"maximumWidth")
+        self.context_anim.setDuration(200)
+        self.context_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.context_panel_open = False
+        self.context_panel_manual_override = False
+        self.context_auto_opened = False
+
+        tabs.addTab(self.panel_log, "LOG")
         # Tab 2: MANAGE CONVERSATION HISTORY
         tab2 = CyberPanel("◈ MANAGE CONTEXT", PINK)
         lay2 = QVBoxLayout(tab2)
@@ -415,13 +473,16 @@ class GraceHUD(QMainWindow):
         
         self.btn_sleep    = CyberButton("SLEEP", CYAN)
         self.btn_train    = CyberButton("TRAIN VOICE", GREEN)
+        self.btn_env      = CyberButton("ENV: LOCAL", GREEN)
         self.btn_api_quota = CyberButton("API QUOTA", AMBER)
         self.btn_shutdown = CyberButton("SHUTDOWN", PINK)
         
         self.btn_api_quota.clicked.connect(self.api_pane.toggle)
+        self.btn_env.clicked.connect(self._prompt_env_toggle)
         
         ac_lay.addWidget(self.btn_sleep)
         ac_lay.addWidget(self.btn_train)
+        ac_lay.addWidget(self.btn_env)
         ac_lay.addWidget(self.btn_api_quota)
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
@@ -430,7 +491,7 @@ class GraceHUD(QMainWindow):
         stream_panel = CyberPanel("◈ RAW DATA STREAM", CYAN)
         stream_lay = QVBoxLayout(stream_panel)
         stream_lay.setContentsMargins(12, 16, 12, 12)
-        self.matrix_stream = HexMatrixStream(CYAN_DIM)
+        self.matrix_stream = MatrixRain(CYAN_DIM)
         self.matrix_stream.setFixedHeight(90)
         stream_lay.addWidget(self.matrix_stream)
         lay.addWidget(stream_panel)
@@ -474,11 +535,17 @@ class GraceHUD(QMainWindow):
         self.sig_latency.connect(self._on_latency)
         self.sig_wave.connect(self.audio_monitor.update_bars)
         self.sig_wave.connect(self.small_wave.update_bars)
+        self.sig_wave.connect(self.context_panel.update_audio)
         self.sig_map_update.connect(self.map_pane.process_map_data)
+        self.sig_search_update.connect(self._show_search_hologram)
         self.map_pane.sig_data_ready.connect(lambda: self.map_tab.set_glow(True))
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
         self.sig_rag_stats.connect(self._on_rag_stats)
+        self.sig_clear_context.connect(self.clear_chat_ui)
+        self.sig_show_briefing_panel.connect(self.briefing_pane.slide_in)
+        self.sig_context_scene.connect(self._on_context_scene)
+        self.context_panel.sig_scene_done.connect(self._on_scene_done)
         self.btn_shutdown.clicked.connect(self.close)
         self.btn_train.clicked.connect(self._open_enrollment)
         self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)
@@ -555,13 +622,21 @@ class GraceHUD(QMainWindow):
 
     def _tick_stats(self):
         self.bar_cpu.setValue(psutil.cpu_percent())
-        self.bar_ram.setValue(psutil.virtual_memory().percent)
+        
+        # Revert back to tracking total system RAM so it matches Windows Task Manager exactly
+        try:
+            self.bar_ram.setValue(int(psutil.virtual_memory().percent))
+        except Exception as e:
+            print("RAM STAT ERROR:", e)
+            self.bar_ram.setValue(0)
+            
         try:
             gpus = GPUtil.getGPUs()
             if gpus:
-                self.bar_gpu.setValue(gpus[0].load * 100)
-                self.bar_vram.setValue(gpus[0].memoryUtil * 100)
-        except Exception:
+                self.bar_gpu.setValue(int(gpus[0].load * 100))
+                self.bar_vram.setValue(int(gpus[0].memoryUtil * 100))
+        except Exception as e:
+            print("GPU STAT ERROR:", e)
             pass
 
     def _tick_wave(self):
@@ -572,9 +647,24 @@ class GraceHUD(QMainWindow):
         ]
         self.audio_monitor.update_bars(bars)
         self.small_wave.update_bars(bars)
+        
+        # Orb animations
+        if hasattr(self, 'state') and self.context_panel_open:
+            if self.state == "SPEAKING":
+                # Dramatic pulsing while speaking (PINK)
+                self.context_panel.orb.set_amplitude(bars[0] * 3.0)
+                self.context_panel.orb.set_color(PINK)
+            elif self.state == "LISTENING":
+                # Gentle pulsing while listening (GREEN)
+                self.context_panel.orb.set_amplitude(bars[0] * 1.5)
+                self.context_panel.orb.set_color(GREEN)
+            else:
+                self.context_panel.orb.set_amplitude(0)
+                self.context_panel.orb.set_color(CYAN)
 
     # ── PUBLIC API (state and pipeline) ───
     def _on_state(self, state: str):
+        self.state = state
         self.state_ind.set_state(state)
         self.state_ring.set_state(state)
         
@@ -583,28 +673,47 @@ class GraceHUD(QMainWindow):
             self.lbl_input_state.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
             self.matrix_stream.set_speed("CALM")
             self.matrix_stream.set_color(CYAN_DIM)
+            self.context_panel.orb.set_color(CYAN)
+            self.context_panel.orb.set_amplitude(0)
         elif state == "LISTENING":
             self.lbl_input_state.setText("LISTENING...")
             self.lbl_input_state.setStyleSheet(f"color: {GREEN}; background: transparent;")
             self.matrix_stream.set_speed("FAST")
             self.matrix_stream.set_color(CYAN_DIM)
+            self.context_panel.orb.set_color(GREEN)
         elif state == "PROCESSING":
             self.lbl_input_state.setText("THINKING...")
             self.lbl_input_state.setStyleSheet(f"color: {AMBER}; background: transparent;")
             self.matrix_stream.set_speed("FAST")
             self.matrix_stream.set_color(CYAN_DIM)
+            self.context_panel.orb.set_color(AMBER)
         elif state == "SPEAKING":
             self.lbl_input_state.setText("SPEAKING...")
             self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
             self.matrix_stream.set_speed("FAST")
             self.matrix_stream.set_color(PINK)
+            self.context_panel.orb.set_color(PINK)
         elif state == "REJECTED":
             self.lbl_input_state.setText("UNKNOWN SPEAKER REJECTED")
             self.lbl_input_state.setStyleSheet(f"color: {PINK}; background: transparent;")
             self.matrix_stream.set_speed("CALM")
             self.matrix_stream.set_color(PINK)
+            self.context_panel.orb.set_color(PINK)
             
         self.timer_wave.setInterval(50 if state == "LISTENING" else 40 if state == "SPEAKING" else 80)
+        
+        # Auto-open ContextPanel when speaking (if not manually overridden)
+        if hasattr(self, 'context_panel_manual_override'):
+            if state == "SPEAKING":
+                if not self.context_panel_open and not self.context_panel_manual_override:
+                    self._toggle_context_panel(is_auto=True)
+            elif state in ["IDLE", "LISTENING"]:
+                # Only auto-close if showing presence orb, NOT if showing a file scene
+                if (self.context_panel_open
+                        and getattr(self, 'context_auto_opened', False)
+                        and not self.context_panel_manual_override
+                        and self.context_panel.mode == "presence"):
+                    self._toggle_context_panel(is_auto=True)
         
     def _on_rag_stats(self, stats: dict):
         if "pinecone" in stats and stats["pinecone"]:
@@ -654,11 +763,27 @@ class GraceHUD(QMainWindow):
             self.lbl_queries.setText(str(self.bubble_count))
             self.api_pane.update_usage(self.bubble_count)
             
-        QTimer.singleShot(50, self._scroll_bottom)
+        # Only auto-scroll if we're not bulk-loading history
+        if not self._loading_history:
+            QTimer.singleShot(50, self._smart_scroll)
+
+    def _smart_scroll(self):
+        """Only scroll to bottom if user is already near the bottom (within 60px).
+        This prevents yanking the user back down when they've scrolled up to re-read."""
+        sb = self.scroll_area.verticalScrollBar()
+        near_bottom = (sb.maximum() - sb.value()) < 60
+        if near_bottom:
+            sb.setValue(sb.maximum())
 
     def _scroll_bottom(self):
+        """Force scroll to absolute bottom (used after history load)."""
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def finish_history_load(self):
+        """Called by pipeline after all history bubbles are added."""
+        self._loading_history = False
+        QTimer.singleShot(100, self._scroll_bottom)
 
     def clear_chat_ui(self):
         while self.chat_layout.count():
@@ -696,6 +821,28 @@ class GraceHUD(QMainWindow):
         dlg = DangerConfirmDialog("Are you sure you want to PERMANENTLY erase ALL long-term memories from Pinecone? This action CANNOT BE UNDONE.", self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.sig_clear_pinecone.emit()
+            
+    def _prompt_env_toggle(self):
+        if "LOCAL" in self.btn_env.text():
+            self.btn_env.setText("ENV: CLOUD")
+            self.btn_env.set_color(AMBER)
+            self.sig_env_toggle.emit("CLOUD")
+        else:
+            self.btn_env.setText("ENV: LOCAL")
+            self.btn_env.glow_color = GREEN
+            self.btn_env.update()
+            self.sig_env_toggle.emit("LOCAL")
+
+    def _show_search_hologram(self, search_data):
+        print(f"[DEBUG] _show_search_hologram TRIGGERED! Data keys: {list(search_data.keys())}", flush=True)
+        try:
+            hw = HoloSearchWindow(search_data)
+            self.search_windows.append(hw)
+            hw.finished.connect(lambda: self.search_windows.remove(hw) if hw in self.search_windows else None)
+            hw.show()
+            print("[DEBUG] HoloSearchWindow instantiated and show() called successfully.", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] ERROR in _show_search_hologram: {e}", flush=True)
 
     def show_toaster(self, message):
         self.toaster = ToasterMessage(message, self)
@@ -716,6 +863,52 @@ class GraceHUD(QMainWindow):
             self.sig_text_input.emit(text)
             self.text_input.clear()
 
+
+
+    def _toggle_context_panel(self, is_auto=False):
+        self.context_panel_open = not self.context_panel_open
+        if not is_auto:
+            self.context_panel_manual_override = self.context_panel_open
+        else:
+            self.context_auto_opened = self.context_panel_open
+        self.context_anim.stop()
+        
+        if self.context_panel_open:
+            # Approx 50% width
+            target_w = self.panel_log.width() // 2
+            self.context_anim.setStartValue(self.context_panel.width())
+            self.context_anim.setEndValue(target_w)
+            try:
+                self.context_anim.finished.disconnect()
+            except TypeError:
+                pass
+            self.context_anim.finished.connect(lambda: self.context_panel.setMaximumWidth(16777215))
+            self.context_anim.start()
+        else:
+            self.context_panel.setMaximumWidth(self.context_panel.width())
+            self.context_anim.setStartValue(self.context_panel.width())
+            self.context_anim.setEndValue(0)
+            try:
+                self.context_anim.finished.disconnect()
+            except TypeError:
+                pass
+            self.context_anim.start()
+
+    def _on_context_scene(self, data):
+        if not self.context_panel_open:
+            self._toggle_context_panel(is_auto=True)
+        self.context_panel.set_scene_mode(
+            directory=data.get('directory', '.'),
+            file_changed=data.get('file_changed', 'unknown'),
+            operation=data.get('operation', 'NEW')
+        )
+
+    def _on_scene_done(self):
+        """Called when scene auto-reverts to presence after 8s. Close panel if not manually pinned."""
+        if (self.context_panel_open
+                and not self.context_panel_manual_override
+                and self.state in ["IDLE", "LISTENING"]):
+            self._toggle_context_panel(is_auto=True)
 
 # ──────────────────────────────────────────
 # STANDALONE DEMO RUN

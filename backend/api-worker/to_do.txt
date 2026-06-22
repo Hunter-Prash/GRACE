@@ -1,0 +1,14 @@
+# Sunday Reset Plan
+
+1. TCS (Walgreens STEP Project): 
+   - Extract one architectural lesson from the project (e.g., data pipeline structure).
+   - Document the lesson for personal growth.
+
+2. DSA (LeetCode):
+   - Solve two medium-level problems to break the 15-day streak and resume momentum.
+
+3. Java Modules:
+   - Dedicate one hour of deep-focus study to Module 4.
+
+4. Health/Running:
+   - Recon mission: Explore SIPCOT IT Park perimeter/roads near the office for a potential running route (around 6:00 AM).

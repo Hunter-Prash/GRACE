@@ -1,9 +1,22 @@
 import sys
 import threading
 import os
+import traceback
 from dotenv import load_dotenv
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import qInstallMessageHandler
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    with open("error_log.txt", "a") as f:
+        f.write("Uncaught exception:\n")
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+    print("Uncaught exception logged to error_log.txt", file=sys.stderr)
+
+sys.excepthook = handle_exception
+
 from gui.hud import GraceHUD
 from core.pipeline import run_pipeline, latency_monitor_thread, rag_monitor_thread
 
@@ -21,7 +34,43 @@ qInstallMessageHandler(_qt_msg_handler)
 
 load_dotenv(os.path.join("backend", ".env"))
 
+import subprocess
+import atexit
+
+node_process = None
+
+def start_backend():
+    global node_process
+    backend_dir = os.path.join(os.path.dirname(__file__), "backend", "api-worker")
+    if os.path.exists(os.path.join(backend_dir, "local-server.js")):
+        try:
+            print("[SYSTEM] Starting local Node.js backend...")
+            flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            log_file = open("node_backend.log", "w")
+            node_process = subprocess.Popen(
+                ["node", "local-server.js"],
+                cwd=backend_dir,
+                creationflags=flags,
+                stdout=log_file,
+                stderr=log_file
+            )
+        except Exception as e:
+            print(f"[SYSTEM] Failed to start local Node.js backend: {e}")
+
+def stop_backend():
+    global node_process
+    if node_process:
+        print("[SYSTEM] Shutting down local Node.js backend...")
+        node_process.terminate()
+        try:
+            node_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            node_process.kill()
+
+atexit.register(stop_backend)
+
 def main():
+    start_backend()
     app = QApplication(sys.argv)
     hud = GraceHUD()
     hud.show()

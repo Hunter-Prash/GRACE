@@ -73,3 +73,27 @@ export async function getDailyMetrics() {
         throw e;
     }
 }
+
+export async function getAllDailyMetrics() {
+    try {
+        const params = {
+            TableName: "Grace_DailyMetrics"
+        };
+        // Scan the table. Note: If the table gets very large, this may need pagination.
+        const response = await docClient.send(new ScanCommand(params));
+        
+        let items = response.Items || [];
+        // Sort by Date descending (newest first)
+        items.sort((a, b) => {
+            const dateA = a.Date || "";
+            const dateB = b.Date || "";
+            return dateB.localeCompare(dateA);
+        });
+        
+        // Return only the last 5 days
+        return items.slice(0, 5);
+    } catch (e) {
+        console.error(`WARNING: Could not fetch all daily metrics: ${e.message}`);
+        throw e;
+    }
+}

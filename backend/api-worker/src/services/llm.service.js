@@ -1,12 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
-import { GEMINI_API_KEY } from '../config.js';
+import { getGeminiKey } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
 import { createGoal, updateMilestone, getActiveGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
-import { updateDailyMetrics } from './metrics.service.js';
-import { openResource } from './osManager.service.js';
+import { updateDailyMetrics, getAllDailyMetrics } from './metrics.service.js';
+import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
 import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
 import { logToDiscord } from './logger.service.js';
+import { searchWeb } from './webSearch.service.js';
+import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
+import { getCurrentDateTime } from './datetime.service.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -31,27 +34,31 @@ async function safeSendMessage(chat, payload, maxRetries = 3) {
 let aiClient = null;
 
 export function initLlmClient() {
-    if (!GEMINI_API_KEY) {
+    const key = getGeminiKey();
+    if (!key) {
         console.error("CRITICAL ERROR: GEMINI_API_KEY is not set.");
         return null;
     }
-    aiClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    aiClient = new GoogleGenAI({ apiKey: key });
     return aiClient;
 }
 
 export async function processChat(sessionId, userText) {
     if (!aiClient) initLlmClient();
+    await initMcpClient();
 
     const dbStart = performance.now();
-    const dbHistory = await loadChatHistory(sessionId, 50);
-
-    const ragContext = await getEmbedding(userText);
+    // Run DynamoDB history load and Pinecone RAG query in PARALLEL — they are independent
+    const [dbHistory, ragContext] = await Promise.all([
+        loadChatHistory(sessionId, 50),
+        getEmbedding(userText, 5)
+    ]);
 
 
     let memoryContextString = "";
     if (ragContext && ragContext.result && ragContext.result.hits) {
         // Lowered threshold: Pinecone's llama-text-embed-v2 often scores relevant hits around 0.2 - 0.3
-        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.15);
+        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.2);
         await logToDiscord(`[RAG ENGINE] Pulled ${relevantHits.length} memories from Pinecone!`);
 
 
@@ -151,12 +158,20 @@ Filter every career-related response through this question: "How does this move 
                 }
             },
             {
+                name: "getAllDailyMetrics",
+                description: "Fetches all historical daily metrics logs including habits, mood, energy, and core focus. Use this when the user asks to see past logs or daily metrics history.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {}
+                }
+            },
+            {
                 name: "openResource",
-                description: "Opens a desktop application or resource on the user's computer. Call this whenever the user asks to open an app like Chrome, VSCode, Spotify, etc.",
+                description: "Opens a desktop application or a specific website on the user's computer. Call this whenever the user asks to open an app (e.g. 'chrome', 'vscode', 'spotify') or a website (e.g. 'youtube', 'google'). If it is a website, you MUST pass a fully qualified https:// URL.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
-                        resourceName: { type: "STRING", description: "The name of the application to open, e.g., 'chrome', 'vscode', 'terminal', 'spotify'" }
+                        resourceName: { type: "STRING", description: "The exact application name, OR the full https:// URL to open." }
                     },
                     required: ["resourceName"]
                 }
@@ -214,9 +229,49 @@ Filter every career-related response through this question: "How does this move 
                     },
                     required: ["query"]
                 }
+            },
+            {
+                name: "searchWeb",
+                description: "Performs a live web search using DuckDuckGo and returns text snippets of the top results. Use this whenever the user asks for real-time information, news, current events, factual lookups, or asks you to search the web.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        query: { type: "STRING", description: "The precise search query to look up on the web" }
+                    },
+                    required: ["query"]
+                }
+            },
+            {
+                name: "detectFileOperation",
+                description: "Triggers the scene_mode context panel in the GUI to show a directory preview. Call this when you perform or detect ANY file operation including reading, viewing, creation, modification, or deletion.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        directory: { type: "STRING", description: "The FULL absolute path of the directory containing the file (e.g. 'D:/PERSONAL/GRACE/core')" },
+                        file_changed: { type: "STRING", description: "Just the filename, not the full path (e.g. 'hello.txt')" },
+                        operation: { type: "STRING", description: "The type of operation: 'NEW' for creation, 'MODIFIED' for edits, 'DELETE' for deletion, 'READ' for reading/viewing" }
+                    },
+                    required: ["directory", "file_changed", "operation"]
+                }
+            },
+            {
+                name: "getCurrentDateTime",
+                description: "Gets the exact current date and time in IST (Indian Standard Time). Can also calculate future or past dates by providing an offset in days. Use this whenever the user asks about the current date, time, or asks questions like 'a month from now', 'few days from now', etc.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        offsetDays: { type: "INTEGER", description: "Optional. Number of days to add (positive) or subtract (negative) from the current date." }
+                    }
+                }
             }
         ]
     }];
+
+    // Inject dynamic MCP tools into Gemini's tool array
+    const mcpTools = getMcpTools();
+    if (mcpTools && mcpTools.length > 0) {
+        tools[0].functionDeclarations.push(...mcpTools);
+    }
 
     // Initialize chat with tools
 
@@ -233,8 +288,8 @@ Filter every career-related response through this question: "How does this move 
 
     const toolsUsed = [];
     let mapData = null;
-
-
+    let searchData = null;
+    const clientCommands = [];
 
     while (response.functionCalls && response.functionCalls.length > 0) {
         const functionResponses = []; // Array to hold all results
@@ -272,11 +327,14 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus);
                     toolResult = { success: true, message: `Daily metrics updated.` };
                 }
+                else if (call.name === "getAllDailyMetrics") {
+                    const metrics = await getAllDailyMetrics();
+                    toolResult = { success: true, dailyMetrics: metrics };
+                }
                 else if (call.name === 'openResource') {
                     const args = call.args;
-                    const result = await openResource(args.resourceName);
-
-                    toolResult = result;
+                    clientCommands.push({ type: 'openResource', resourceName: args.resourceName });
+                    toolResult = { success: true, message: `Delegated command to user's local operating system to open ${args.resourceName}` };
                 }
                 else if (call.name === 'getActiveGoals') {
                     const goals = await getActiveGoals();
@@ -311,6 +369,26 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     toolResult = { success: true, places: places };
                     mapData = { type: 'places', query: args.query, places: places };
                 }
+                else if (call.name === 'searchWeb') {
+                    const res = await searchWeb(call.args.query);
+                    toolResult = { success: true, results: res.formattedResults };
+                    searchData = res.visualData;
+                }
+                else if (call.name === 'getCurrentDateTime') {
+                    const args = call.args || {};
+                    const res = getCurrentDateTime(args.offsetDays || 0);
+                    toolResult = { success: true, datetime: res };
+                }
+                else if (call.name === 'detectFileOperation') {
+                    const args = call.args;
+                    clientCommands.push({ type: 'fileOperation', data: args });
+                    toolResult = { success: true, message: `Triggered file operation UI context for ${args.file_changed}` };
+                }
+                else {
+                    // Assume it's an MCP tool if it's not a hardcoded local tool
+                    const mcpResult = await callMcpTool(call.name, call.args);
+                    toolResult = { success: true, result: mcpResult };
+                }
             } catch (e) {
                 console.error(`Tool execution failed: ${e.message}`);
                 toolResult = { success: false, error: e.message };
@@ -344,6 +422,8 @@ Gemini never executes your code directly. It doesn't have access to your server,
         dbLatencyMs,
         dbContextItemsCount,
         toolsUsed,
-        mapData
+        mapData,
+        searchData,
+        clientCommands
     };
 }

@@ -1,8 +1,9 @@
 import os
 import math
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF, QRect, QPoint
-from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient, QPixmap, QGuiApplication, QPainterPath, QPolygon, QPolygonF, QBrush, QDesktopServices
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from PyQt6.QtCore import QUrl, pyqtSignal, Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve, QRectF, QRect, QPoint, QPointF
+from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog, QScrollArea, QGraphicsDropShadowEffect
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -29,12 +30,29 @@ class CyberPanel(QFrame):
         self.label = label
         self.glow  = glow
         self.setStyleSheet("background: transparent; border: none;")
+        self.header_widgets = []
         
         self._phase = 0.0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(50)
         
+    def add_header_widget(self, widget):
+        widget.setParent(self)
+        self.header_widgets.append(widget)
+        self._reposition_header_widgets()
+        widget.show()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._reposition_header_widgets()
+
+    def _reposition_header_widgets(self):
+        offset_right = 10
+        for w in reversed(self.header_widgets):
+            w.move(self.width() - offset_right - w.width(), 4)
+            offset_right += w.width() + 5
+
     def _tick(self):
         self._phase = (self._phase + 0.05) % (2 * math.pi)
         self.update()
@@ -474,9 +492,9 @@ class StatusRing(QWidget):
 class ChatBubble(QFrame):
     def __init__(self, speaker, text, parent=None):
         super().__init__(parent)
-        is_user = speaker == "YOU"
+        self.is_user = speaker == "YOU"
         
-        if is_user:
+        if self.is_user:
             color = CYAN
             bg = "rgba(0, 212, 255, 0.07)"
             border_color = "rgba(0, 212, 255, 0.2)"
@@ -519,6 +537,12 @@ class ChatBubble(QFrame):
         
         self.color = color
         
+        if not self.is_user:
+            self._scan_pos = -0.2
+            self.scan_timer = QTimer(self)
+            self.scan_timer.timeout.connect(self._tick_scan)
+            self.scan_timer.start(40)
+            
         # --- FADE IN ANIMATION ---
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self.opacity_effect)
@@ -532,12 +556,35 @@ class ChatBubble(QFrame):
         # --- TYPING EFFECT ---
         self.full_text = text
         self.lbl_txt = lbl_txt
-        if not is_user:
+        if not self.is_user:
             self.lbl_txt.setText("")
             self.type_idx = 0
             self.type_timer = QTimer(self)
             self.type_timer.timeout.connect(self._type_next_char)
             self.type_timer.start(10)  # Type very fast (10ms per loop)
+            
+    def _tick_scan(self):
+        self._scan_pos += 0.016
+        if self._scan_pos > 1.2:
+            self._scan_pos = -0.2
+        self.update()
+        
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if hasattr(self, 'is_user') and not self.is_user:
+            p = QPainter(self)
+            h = self.height()
+            w = self.width()
+            y = int(self._scan_pos * h)
+            beam_h = max(30, h // 2)
+            
+            grad = QLinearGradient(0, y - beam_h//2, 0, y + beam_h//2)
+            grad.setColorAt(0.0, QColor(0,0,0,0))
+            grad.setColorAt(0.5, parse_color(self.color, 12))
+            grad.setColorAt(1.0, QColor(0,0,0,0))
+            
+            p.fillRect(0, y - beam_h//2, w, beam_h, grad)
+            p.fillRect(0, y, w, 1, parse_color(self.color, 25))
             
     def _type_next_char(self):
         if self.type_idx < len(self.full_text):
@@ -597,9 +644,15 @@ class CyberButton(QPushButton):
         self.setText(text)
         self.setFont(mono(9, True))
         self.setFixedHeight(30)
+        self.set_color(color)
         
-        border_color = "rgba(0, 212, 255, 0.2)" if color == CYAN else "rgba(255, 45, 120, 0.2)"
-        hover_bg = "rgba(0, 212, 255, 0.1)" if color == CYAN else "rgba(255, 45, 120, 0.1)"
+    def set_color(self, color):
+        self.color = color
+        border_color = "rgba(0, 212, 255, 0.2)" if color == CYAN else f"rgba(255, 255, 255, 0.2)"
+        hover_bg = "rgba(0, 212, 255, 0.1)" if color == CYAN else f"rgba(255, 255, 255, 0.1)"
+        if color == PINK: border_color = "rgba(255, 45, 120, 0.2)"; hover_bg = "rgba(255, 45, 120, 0.1)"
+        if color == GREEN: border_color = "rgba(0, 255, 136, 0.2)"; hover_bg = "rgba(0, 255, 136, 0.1)"
+        if color == AMBER: border_color = "rgba(255, 170, 0, 0.2)"; hover_bg = "rgba(255, 170, 0, 0.1)"
         
         self.setStyleSheet(f"""
             QPushButton {{
@@ -751,18 +804,103 @@ class TelemetryBar(QWidget):
             p.drawLine(gx, by, gx, by + bh)
 
 # ──────────────────────────────────────────
-# HEX MATRIX STREAMER
+# CONTEXT SATURATION RING
+# ──────────────────────────────────────────
+class ContextSaturationRing(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.max_val = 50
+        self.current_val = 0
+        self._anim_val = 0.0
+        
+        self.setFixedHeight(60)
+        self.setMinimumWidth(200)
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(30)
+        
+    def _tick(self):
+        self._anim_val += (self.current_val - self._anim_val) * 0.1
+        if abs(self.current_val - self._anim_val) < 0.1:
+            self._anim_val = self.current_val
+        self.update()
+        
+    def set_value(self, val):
+        self.current_val = min(val, self.max_val)
+        
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        
+        perc = self._anim_val / max(1, self.max_val)
+        
+        if perc < 0.5:
+            color = CYAN
+        elif perc < 0.85:
+            color = AMBER
+        else:
+            color = PINK
+            
+        c = parse_color(color)
+        c_bg = parse_color(color, 40)
+        
+        ring_size = h - 16
+        cx = 10 + ring_size // 2
+        cy = h // 2
+        
+        # Background ring
+        p.setPen(QPen(c_bg, 4))
+        p.drawEllipse(10, cy - ring_size // 2, ring_size, ring_size)
+        
+        # Foreground arc
+        arc_pen = QPen(c, 4)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arc_pen)
+        
+        start_angle = 90 * 16
+        span_angle = int(-perc * 360 * 16)
+        if span_angle != 0:
+            p.drawArc(10, cy - ring_size // 2, ring_size, ring_size, start_angle, span_angle)
+            
+        # Text
+        tx = 10 + ring_size + 16
+        p.setFont(mono(14, True))
+        p.setPen(c)
+        actual_perc = int((self.current_val / max(1, self.max_val)) * 100)
+        p.drawText(tx, cy + 2, f"{actual_perc}%")
+        
+        p.setFont(mono(8))
+        p.setPen(parse_color(TEXT_DIM))
+        p.drawText(tx, cy + 18, "CONTEXT")
+
+# ──────────────────────────────────────────
+# ANIMATED SIDE PANE (API QUOTA CAROUSEL)
 # ──────────────────────────────────────────
 import random
-class HexMatrixStream(QWidget):
+
+KATAKANA = [chr(i) for i in range(0x30A0, 0x30FF)] + [str(i) for i in range(10)]
+
+class MatrixDrop:
+    def __init__(self, x, h):
+        self.x = x
+        self.y = random.randint(-100, h)
+        self.speed = random.uniform(2, 5)
+        self.chars = [random.choice(KATAKANA) for _ in range(random.randint(6, 16))]
+
+class MatrixRain(QWidget):
     def __init__(self, color=CYAN_DIM, parent=None):
         super().__init__(parent)
         self.color = color
-        self.lines = ["" for _ in range(6)]
-        self.mode = "FAST"
+        self.mode = "CALM"
+        self.drops = []
+        self._init_drops = False
+        self.font_size = 11
+        
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
-        self.timer.start(80)
+        self.timer.start(40)
 
     def set_color(self, color):
         self.color = color
@@ -770,34 +908,59 @@ class HexMatrixStream(QWidget):
 
     def set_speed(self, mode):
         self.mode = mode
-        if mode == "CALM":
-            self.timer.setInterval(250)
-        else:
-            self.timer.setInterval(80)
 
     def _tick(self):
-        chance = 0.05 if self.mode == "CALM" else 0.2
-        for i in range(len(self.lines)):
-            if random.random() > chance:
-                self.lines[i] = " ".join(f"{random.randint(0, 255):02X}" for _ in range(8))
+        h = self.height()
+        w = self.width()
+        
+        if not self._init_drops and w > 0:
+            cols = w // 14
+            for i in range(cols):
+                if random.random() > 0.3:
+                    self.drops.append(MatrixDrop(i * 14 + 4, h))
+            self._init_drops = True
+            
+        # Speed modifier based on Grace's state
+        speed_mult = 1.0
+        if self.mode == "PROCESSING":
+            speed_mult = 0.3
+        elif self.mode in ("LISTENING", "SPEAKING"):
+            speed_mult = 2.0
+            
+        for drop in self.drops:
+            drop.y += drop.speed * speed_mult
+            
+            # Reset if off screen
+            if drop.y - (len(drop.chars) * 14) > h:
+                drop.y = random.randint(-50, -10)
+                drop.chars = [random.choice(KATAKANA) for _ in range(random.randint(6, 16))]
+                
+            # Randomly mutate chars
+            if random.random() > 0.8:
+                idx = random.randint(0, len(drop.chars) - 1)
+                drop.chars[idx] = random.choice(KATAKANA)
+                
         self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setFont(mono(7))
-        h = self.height()
-        w = self.width()
-        step = h // max(1, len(self.lines))
-        for i, text in enumerate(self.lines):
-            # random opacity flicker
-            base_alpha = 20 if self.mode == "CALM" else 40
-            flicker = 30 if self.mode == "CALM" else 80
-            alpha = int(base_alpha + random.random() * flicker)
-            p.setPen(parse_color(self.color, alpha))
-            p.drawText(0, i * step, w, step, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        p.setFont(mono(self.font_size))
+        
+        for drop in self.drops:
+            for i, char in enumerate(drop.chars):
+                char_y = drop.y - (i * 14)
+                if char_y < -14 or char_y > self.height() + 14:
+                    continue
+                    
+                if i == 0:
+                    p.setPen(QColor(255, 255, 255))
+                else:
+                    alpha = max(0, 255 - (i * 20))
+                    p.setPen(parse_color(self.color, alpha))
+                    
+                p.drawText(drop.x, int(char_y), char)
 
-# ──────────────────────────────────────────
 # ANIMATED SIDE PANE (API QUOTA CAROUSEL)
 # ──────────────────────────────────────────
 class AnimatedSidePane(QWidget):
@@ -905,6 +1068,109 @@ class AnimatedSidePane(QWidget):
         if bubble_count > 0 and bubble_count % 40 == 0:
             unindexed = 40
         self.lbl_idx_usage.setText(f"UNINDEXED: {unindexed} / 40")
+
+# ──────────────────────────────────────────
+# DAILY BRIEFING PANEL (Frosted Glass UI)
+# ──────────────────────────────────────────
+class DailyBriefingPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(0)
+        self.setMinimumWidth(0)
+        self.is_open = False
+        
+        # Frosted glass styling with a border
+        self.setStyleSheet(f"background: rgba(20, 20, 30, 210); border-left: 1px solid {CYAN_DIM};")
+        
+        self.main_lay = QVBoxLayout(self)
+        self.main_lay.setContentsMargins(15, 20, 15, 20)
+        self.main_lay.setSpacing(15)
+        
+        # Header
+        header_lay = QHBoxLayout()
+        header_lay.setContentsMargins(0,0,0,0)
+        title = GlowLabel("MORNING BRIEFING", CYAN, 12, True)
+        self.btn_close = CyberButton("X", PINK)
+        self.btn_close.setFixedWidth(30)
+        self.btn_close.clicked.connect(self.slide_out)
+        
+        header_lay.addWidget(title, 1)
+        header_lay.addWidget(self.btn_close, 0)
+        self.main_lay.addLayout(header_lay)
+        
+        # We will populate the goals dynamically here
+        self.content_lay = QVBoxLayout()
+        self.content_lay.setSpacing(15)
+        self.main_lay.addLayout(self.content_lay)
+        
+        self.main_lay.addStretch()
+        
+        # Animation
+        self.anim = QPropertyAnimation(self, b"maximumWidth")
+        self.anim.setDuration(600)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        
+    def populate_data(self, goals_data):
+        # Clear old content
+        while self.content_lay.count():
+            child = self.content_lay.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+                
+        goals = goals_data.get("goals", [])[:2] # Top 2 goals
+        
+        for goal in goals:
+            goal_id = goal.get("goalId", "UNKNOWN")
+            milestones = goal.get("milestones", {})
+            total = len(milestones)
+            completed = sum(1 for v in milestones.values() if v)
+            perc = int((completed / max(1, total)) * 100)
+            
+            # Goal Container
+            g_widget = QWidget()
+            g_widget.setStyleSheet(f"background: rgba(0, 212, 255, 0.05); border: 1px solid {BORDER}; border-radius: 4px;")
+            g_lay = QVBoxLayout(g_widget)
+            g_lay.setContentsMargins(10, 10, 10, 10)
+            
+            lbl_title = GlowLabel(goal_id.upper().replace("-", " "), CYAN, 10, True)
+            g_lay.addWidget(lbl_title)
+            
+            # Custom Progress Bar using StatBar
+            bar = StatBar(f"{completed}/{total}", CYAN)
+            bar.setValue(perc)
+            g_lay.addWidget(bar)
+            
+            self.content_lay.addWidget(g_widget)
+
+        # Static Metrics Icons Row (visual flair)
+        metrics_widget = QWidget()
+        m_lay = QHBoxLayout(metrics_widget)
+        m_lay.setContentsMargins(0, 10, 0, 0)
+        
+        lbl_m = GlowLabel("METRICS: ", TEXT_DIM, 8)
+        m_lay.addWidget(lbl_m)
+        m_lay.addWidget(PulsingDot(GREEN, 8)) # Energy
+        m_lay.addWidget(PulsingDot(CYAN, 8))  # Focus
+        m_lay.addWidget(PulsingDot(PINK, 8))  # Mood
+        m_lay.addStretch()
+        
+        self.content_lay.addWidget(metrics_widget)
+
+    def slide_in(self, goals_data=None):
+        if goals_data:
+            self.populate_data(goals_data)
+        if not self.is_open:
+            self.anim.setStartValue(0)
+            self.anim.setEndValue(300)
+            self.is_open = True
+            self.anim.start()
+            
+    def slide_out(self):
+        if self.is_open:
+            self.anim.setStartValue(300)
+            self.anim.setEndValue(0)
+            self.is_open = False
+            self.anim.start()
 
 # ──────────────────────────────────────────
 # DANGER ZONE CONFIRMATION DIALOG
@@ -1233,5 +1499,841 @@ class AnimatedMapPane(QFrame):
             self.map_widget.show_route(data['originCoords'], data['destCoords'])
         elif data.get('type') == 'places':
             self.map_widget.show_places(data['places'])
-        
         self.sig_data_ready.emit()
+
+# ──────────────────────────────────────────
+# HOLO SEARCH CUSTOM WIDGETS
+# ──────────────────────────────────────────
+class HoloThumbnail(QWidget):
+    def __init__(self, url, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.setFixedSize(160, 100)
+        self.pixmap = None
+        self._scan_y = 0.0
+        self._scan_dir = 1
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._animate)
+        self.timer.start(30)
+        
+    def set_pixmap(self, pixmap):
+        self.pixmap = pixmap
+        self.update()
+        
+    def _animate(self):
+        pass
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        
+        path = QPainterPath()
+        c = 12
+        path.moveTo(0, 0)
+        path.lineTo(w - c, 0)
+        path.lineTo(w, c)
+        path.lineTo(w, h)
+        path.lineTo(c, h)
+        path.lineTo(0, h - c)
+        path.closeSubpath()
+        
+        painter.setClipPath(path)
+        
+        if self.pixmap:
+            painter.drawPixmap(self.rect(), self.pixmap)
+        else:
+            # Pure dark fallback
+            painter.fillRect(self.rect(), QColor(5, 5, 5, 255))
+            
+        painter.setClipping(False)
+        
+        # Draw thin dim border
+        pen = QPen(parse_color(CYAN_DIM))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+        
+        # Draw bright bottom cyan border glow/scan
+        pen = QPen(parse_color(CYAN))
+        pen.setWidth(3)
+        painter.setPen(pen)
+        painter.drawLine(c, h, w, h)
+
+class HoloCard(QWidget):
+    def __init__(self, title, url, content, is_new=False, parent=None):
+        super().__init__(parent)
+        self.is_new = is_new
+        self.url = url
+        
+        # Setup layout
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(6)
+        
+        # Title (Pink)
+        t_lbl = GlowLabel(title, PINK, 10, True)
+        t_lbl.setWordWrap(True)
+        lay.addWidget(t_lbl)
+        
+        # Source (Cyan)
+        import urllib.parse
+        domain = urllib.parse.urlparse(url).netloc.upper()
+        s_lbl = QLabel(f"VERIFIED SOURCE // {domain}")
+        s_lbl.setFont(mono(8))
+        s_lbl.setStyleSheet(f"color: {CYAN}; border: none; background: transparent;")
+        lay.addWidget(s_lbl)
+        
+        # Snippet
+        c_lbl = QLabel(content)
+        c_lbl.setFont(sans(9))
+        c_lbl.setStyleSheet(f"color: {TEXT_DIM}; border: none; background: transparent; line-height: 1.4;")
+        c_lbl.setWordWrap(True)
+        lay.addWidget(c_lbl)
+        
+        # Link
+        link = QLabel(f'[ ACCESS SECURE DATALINK ]')
+        link.setFont(mono(8))
+        link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
+        link.setCursor(Qt.CursorShape.PointingHandCursor)
+        def _open_link(e, u=self.url):
+            QDesktopServices.openUrl(QUrl(u))
+        link.mousePressEvent = _open_link
+        lay.addWidget(link)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        
+        path = QPainterPath()
+        c = 16
+        path.moveTo(0, 0)
+        path.lineTo(w - c, 0)
+        path.lineTo(w, c)
+        path.lineTo(w, h)
+        path.lineTo(c, h)
+        path.lineTo(0, h - c)
+        path.closeSubpath()
+        
+        # Background pure black/dark
+        painter.fillPath(path, QColor(8, 8, 12, 240))
+        
+        # Border gradient
+        pen_grad = QLinearGradient(0, 0, w, h)
+        pen_grad.setColorAt(0, parse_color(PINK))
+        pen_grad.setColorAt(0.35, parse_color(CYAN))
+        pen_grad.setColorAt(1, parse_color(CYAN))
+        
+        pen = QPen(pen_grad, 2)
+        painter.setPen(pen)
+        painter.drawPath(path)
+        
+        if self.is_new:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(parse_color(CYAN))
+            tag = QPolygonF([
+                QPointF(w - 40, 0),
+                QPointF(w - c, 0),
+                QPointF(w, c),
+                QPointF(w, 24),
+                QPointF(w - 40, 24)
+            ])
+            painter.drawPolygon(tag)
+            
+            painter.setPen(QColor(0,0,0))
+            painter.setFont(mono(8, True))
+            painter.drawText(QRect(w - 36, 4, 32, 16), Qt.AlignmentFlag.AlignCenter, "NEW")
+
+# ──────────────────────────────────────────
+# HOLOGRAPHIC SEARCH WINDOW (Jarvis Style)
+# ──────────────────────────────────────────
+class HoloSearchWindow(QDialog):
+    def __init__(self, search_data, parent=None):
+        super().__init__(parent)
+        self.search_data = search_data
+        self._drag_pos = None
+        self._card_widgets = []
+        
+        # Frameless, translucent, always-on-top
+        self.setWindowFlags(
+            Qt.WindowType.Dialog |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(640, 720)
+        
+        self.network_manager = QNetworkAccessManager(self)
+        
+        self.init_ui()
+        self.populate_data()
+        
+        # ── Slide-up + Fade-in Animation ──────────────────
+        screen = QGuiApplication.primaryScreen().geometry()
+        self._x_pos = screen.width() // 2 - 320
+        self._end_y  = max(0, screen.height() // 2 - 360)
+        self._start_y = self._end_y + 120
+        
+        self.setGeometry(self._x_pos, self._start_y, 640, 720)
+        self.setWindowOpacity(0.0)
+        
+        self.anim_group = QParallelAnimationGroup(self)
+        
+        op = QPropertyAnimation(self, b"windowOpacity")
+        op.setDuration(550)
+        op.setStartValue(0.0)
+        op.setEndValue(1.0)
+        op.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        pos = QPropertyAnimation(self, b"pos")
+        pos.setDuration(750)
+        pos.setStartValue(QPoint(self._x_pos, self._start_y))
+        pos.setEndValue(QPoint(self._x_pos, self._end_y))
+        pos.setEasingCurve(QEasingCurve.Type.OutBack)
+        
+        self.anim_group.addAnimation(op)
+        self.anim_group.addAnimation(pos)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.anim_group.start()
+        # ── Sequential card pop-in ─────────────────────────
+        QTimer.singleShot(500, self._animate_cards_in)
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        
+        self.bg_frame = QFrame()
+        self.bg_frame.setStyleSheet(
+            f"background-color: #030406;"
+            f"border: 1px solid rgba(255, 60, 120, 100);"
+            f"border-radius: 0px;"
+        )
+        
+        frame_layout = QVBoxLayout(self.bg_frame)
+        frame_layout.setContentsMargins(18, 14, 18, 18)
+        frame_layout.setSpacing(10)
+        
+        # ── Header bar ────────────────────────────────────
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
+        
+        # Title Area
+        t_lay = QHBoxLayout()
+        t_lay.setContentsMargins(10, 4, 10, 4)
+        icon = GlowLabel("◈", CYAN, 12, True)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setFixedSize(22, 22)
+        icon.setStyleSheet(f"color: {CYAN}; border: 1px solid {CYAN}; border-radius: 11px;")
+        t_lay.addWidget(icon)
+        title = GlowLabel("HOLO-SEARCH", PINK, 11, True)
+        title.setStyleSheet(f"color: {PINK}; letter-spacing: 4px; font-weight: bold; border: none;")
+        t_lay.addWidget(title)
+        header_layout.addLayout(t_lay)
+        
+        header_layout.addStretch()
+        
+        # Signal Area
+        s_lay = QHBoxLayout()
+        s_lay.setContentsMargins(10, 4, 10, 4)
+        dot = PulsingDot(CYAN, 7)
+        s_lay.addWidget(dot)
+        signal = GlowLabel("SIGNAL: STRONG", CYAN, 9, True)
+        signal.setStyleSheet(f"color: {CYAN}; border: none;")
+        s_lay.addWidget(signal)
+        header_layout.addLayout(s_lay)
+        
+        header_layout.addSpacing(16)
+        
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(28, 28)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                color: {PINK}; background: transparent;
+                border: 1px solid {PINK}; border-radius: 0px;
+                font-size: 12px; font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255,60,120,0.25);
+                border: 1px solid {PINK};
+            }}
+        """)
+        btn_close.clicked.connect(self.close_window)
+        header_layout.addWidget(btn_close)
+        frame_layout.addLayout(header_layout)
+        
+        frame_layout.addSpacing(4)
+        
+        # ── Query label (Box) ───────────────────────────────────
+        query = self.search_data.get('query', '')
+        q_frame = QFrame()
+        q_frame.setStyleSheet(f"border: 1px solid {CYAN_DIM}; border-radius: 0px; background: transparent;")
+        q_lay = QHBoxLayout(q_frame)
+        q_lay.setContentsMargins(12, 6, 12, 6)
+        q_lbl = GlowLabel(f"QUERY > {query.lower()}", CYAN, 9, True)
+        q_lbl.setStyleSheet(f"color: {CYAN}; border: none;")
+        q_lay.addWidget(q_lbl)
+        frame_layout.addWidget(q_frame)
+        
+        # ── Main Scroll Area ──────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: rgba(0, 0, 0, 0);
+                width: 6px;
+                border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {CYAN};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+        
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setSpacing(12)
+        self.scroll_layout.setContentsMargins(0, 4, 4, 4)
+        
+        scroll.setWidget(self.scroll_content)
+        frame_layout.addWidget(scroll)
+        
+        # ── Footer Stats ──────────────────────────────────
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(4, 8, 4, 0)
+        res_count = len(self.search_data.get('results', []))
+        self.lbl_results = GlowLabel(f"RESULTS:  {res_count}", CYAN_DIM, 8, True)
+        
+        import random
+        lat = random.randint(180, 420)
+        self.lbl_latency = GlowLabel(f"LATENCY:  {lat}ms", CYAN_DIM, 8, True)
+        
+        self.lbl_uplink = GlowLabel("UPLINK:  ENCRYPTED", CYAN_DIM, 8, True)
+        
+        footer_layout.addWidget(self.lbl_results)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.lbl_latency)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.lbl_uplink)
+        
+        frame_layout.addLayout(footer_layout)
+        
+        main_layout.addWidget(self.bg_frame)
+
+    @staticmethod
+    def _clean_text(text):
+        """Strip markdown formatting from snippet text."""
+        import re
+        text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [text](url) -> text
+        text = re.sub(r'#{1,6}\s*', '', text)                   # headings
+        text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)   # bold/italic
+        text = re.sub(r'`([^`]+)`', r'\1', text)                # inline code
+        text = re.sub(r'\n{3,}', '\n\n', text)                  # excess newlines
+        return text.strip()
+
+    def populate_data(self):
+        images = self.search_data.get('images', [])
+        
+        # ── HOLOGRAPHIC IMAGE STRIP ──
+        if images:
+            img_scroll = QScrollArea()
+            img_scroll.setFixedHeight(145)
+            img_scroll.setWidgetResizable(True)
+            img_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            img_scroll.setStyleSheet(f"""
+                QScrollArea {{ border: none; background: transparent; }}
+                QScrollBar:horizontal {{
+                    background: rgba(0,0,0,0); height: 5px; border-radius: 2px;
+                }}
+                QScrollBar::handle:horizontal {{
+                    background: {CYAN}; border-radius: 2px;
+                }}
+                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; }}
+            """)
+            img_container = QWidget()
+            img_container.setStyleSheet("background: transparent;")
+            img_lay = QHBoxLayout(img_container)
+            img_lay.setContentsMargins(0, 0, 0, 0)
+            img_lay.setSpacing(12)
+            
+            for url in images[:6]:
+                thumb = HoloThumbnail(url)
+                # Drop shadow on the whole thumbnail widget
+                glow = QGraphicsDropShadowEffect(self)
+                glow.setBlurRadius(15)
+                glow.setColor(parse_color(CYAN_DIM))
+                glow.setOffset(0, 0)
+                thumb.setGraphicsEffect(glow)
+                
+                img_lay.addWidget(thumb)
+                self.fetch_image(url, thumb)
+            
+            img_lay.addStretch()
+            img_scroll.setWidget(img_container)
+            self.scroll_layout.addWidget(img_scroll)
+
+        # ── JARVIS STYLE RESULTS CARDS ──
+        results = self.search_data.get('results', [])
+        for i, res in enumerate(results[:5]):
+            title = self._clean_text(res.get('title', 'Unknown'))
+            url = res.get('url', '#')
+            content = self._clean_text(res.get('content', ''))
+            if len(content) > 300:
+                content = content[:297] + "..."
+            
+            is_new = (i == 0) # Only tag the first as NEW for aesthetic
+            
+            card = HoloCard(title, url, content, is_new)
+            
+            # Subtle Drop shadow instead of massive glow
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(8)
+            shadow.setColor(QColor(255, 60, 120, 40)) # Faint pink shadow
+            shadow.setOffset(0, 0)
+            card.setGraphicsEffect(shadow)
+            
+            card.hide() # Hidden for pop-in animation
+            self._card_widgets.append(card)
+            self.scroll_layout.addWidget(card)
+            
+        self.scroll_layout.addStretch()
+
+    def _animate_cards_in(self):
+        for i, card in enumerate(self._card_widgets):
+            QTimer.singleShot(i * 120, card.show)
+
+    def _animate_cards_in(self):
+        for i, card in enumerate(self._card_widgets):
+            QTimer.singleShot(i * 120, card.show)
+
+    # ── DRAGGING LOGIC ──
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        
+    def fetch_image(self, url, label):
+        req = QNetworkRequest(QUrl(url))
+        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        reply = self.network_manager.get(req)
+        # Using a default argument trick to capture reply and label inside lambda
+        reply.finished.connect(lambda r=reply, l=label: self.on_image_fetched(r, l))
+        
+    def on_image_fetched(self, reply, label):
+        if reply.error() == QNetworkReply.NetworkError.NoError:
+            data = reply.readAll()
+            pixmap = QPixmap()
+            pixmap.loadFromData(data)
+            if not pixmap.isNull():
+                if hasattr(label, 'set_pixmap'):
+                    label.set_pixmap(pixmap)
+                else:
+                    label.setPixmap(pixmap)
+            else:
+                if hasattr(label, 'setText'):
+                    label.setText("Invalid Image")
+        else:
+            if hasattr(label, 'setText'):
+                label.setText("Image Error")
+        reply.deleteLater()
+        
+    def close_window(self):
+        self.anim_group.setDirection(QPropertyAnimation.Direction.Backward)
+        self.anim_group.finished.connect(self.accept)
+        self.anim_group.start()
+
+    # Make frameless window draggable
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+# ──────────────────────────────────────────
+# CIRCUIT BOARD BACKGROUND (Animated Faint Traces)
+# ──────────────────────────────────────────
+class CircuitBoardBackground(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._phase = 0.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._animate)
+        self.timer.start(50)
+        
+    def _animate(self):
+        self._phase += 0.05
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Faint cyan traces
+        pen = QPen(QColor(0, 212, 255, 12)) 
+        pen.setWidth(1)
+        painter.setPen(pen)
+        
+        w = self.width()
+        h = self.height()
+        if w == 0 or h == 0: return
+        
+        # Hardcoded proportional paths for circuit traces
+        lines = [
+            (0.1*w, 0.2*h, 0.3*w, 0.2*h),
+            (0.3*w, 0.2*h, 0.3*w, 0.5*h),
+            (0.3*w, 0.5*h, 0.6*w, 0.5*h),
+            
+            (0.8*w, 0.1*h, 0.8*w, 0.4*h),
+            (0.8*w, 0.4*h, 0.5*w, 0.4*h),
+            (0.5*w, 0.4*h, 0.5*w, 0.8*h),
+            
+            (0.15*w, 0.8*h, 0.35*w, 0.8*h),
+            (0.35*w, 0.8*h, 0.35*w, 0.6*h),
+            
+            (0.9*w, 0.7*h, 0.7*w, 0.7*h),
+            (0.7*w, 0.7*h, 0.7*w, 0.9*h)
+        ]
+        
+        for lx1, ly1, lx2, ly2 in lines:
+            painter.drawLine(int(lx1), int(ly1), int(lx2), int(ly2))
+            
+        # Draw microchips (rectangles)
+        painter.setBrush(QColor(0, 0, 0, 0)) # transparent fill
+        painter.drawRect(int(0.05*w), int(0.15*h), int(0.05*w), int(0.1*h))
+        painter.drawRect(int(0.75*w), int(0.35*h), int(0.08*w), int(0.1*h))
+        painter.drawRect(int(0.45*w), int(0.75*h), int(0.06*w), int(0.06*h))
+        
+        # Draw animated data packets moving along paths
+        packet_color = QColor(0, 212, 255, 40) # Slightly brighter than traces
+        painter.setBrush(packet_color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        for i, (lx1, ly1, lx2, ly2) in enumerate(lines):
+            # smooth back and forth movement using sin
+            t = (math.sin(self._phase + i*1.3) + 1) / 2.0
+            px = lx1 + (lx2 - lx1) * t
+            py = ly1 + (ly2 - ly1) * t
+            painter.drawEllipse(QPoint(int(px), int(py)), 2, 2)
+
+
+# ──────────────────────────────────────────
+# PRESENCE ORB WIDGET (Expanding Ripple Rings)
+# ──────────────────────────────────────────
+class PresenceOrb(QWidget):
+    NUM_RINGS = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(140, 140)
+        self._phase = 0.0
+        self._amplitude = 0.0
+        self._color = CYAN
+        self._core_radius = 28
+        self._max_ring_expand = 30  # how far rings travel outward
+
+        # 60fps internal timer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(16)
+
+    def _tick(self):
+        # Speed scales with amplitude: idle ~0.01, speaking ~0.02-0.035
+        speed = 0.01 + self._amplitude * 0.025
+        self._phase += speed
+        self.update()
+
+    def set_phase(self, phase):
+        # Keep for compatibility but internal timer drives animation
+        pass
+
+    def set_amplitude(self, amp):
+        self._amplitude = min(1.0, max(0.0, amp))
+
+    def set_color(self, hex_color):
+        self._color = hex_color
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx, cy = self.width() / 2, self.height() / 2
+
+        amp = self._amplitude
+        phase = self._phase
+
+        # Dynamic core: breathes gently, swells with amplitude
+        breath = (math.sin(phase * 2.0) + 1) / 2  # 0..1
+        core_r = self._core_radius + breath * 3 + amp * 6
+
+        # Soft inner glow fill
+        glow_alpha = int(15 + breath * 20 + amp * 40)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(self._color, glow_alpha))
+        gr = core_r + 8 + amp * 12
+        p.drawEllipse(QPointF(cx, cy), gr, gr)
+
+        # Core circle outline
+        core_alpha = int(160 + breath * 40 + amp * 55)
+        core_width = 1.5 + amp * 0.5
+        p.setPen(QPen(parse_color(self._color, min(255, core_alpha)), core_width))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(cx, cy), core_r, core_r)
+
+        # --- Three expanding ripple rings ---
+        # Each ring is staggered by 1/3 of a cycle
+        max_expand = self._max_ring_expand + amp * 20
+        for i in range(self.NUM_RINGS):
+            # Stagger each ring evenly across the cycle
+            ring_phase = (phase + i * (2 * math.pi / self.NUM_RINGS)) % (2 * math.pi)
+            # Normalize to 0..1 (one full expansion cycle)
+            t = ring_phase / (2 * math.pi)
+
+            ring_r = core_r + t * max_expand
+            # Fade out as ring expands: full alpha at t=0, zero at t=1
+            ring_alpha = int((1.0 - t) * (100 + amp * 100))
+            ring_width = max(0.5, (1.0 - t) * (1.5 + amp * 1.0))
+
+            if ring_alpha > 2:
+                p.setPen(QPen(parse_color(self._color, min(255, ring_alpha)), ring_width))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
+
+        p.end()
+
+# ──────────────────────────────────────────
+# CONTEXT PANEL (Togglable Split View)
+# ──────────────────────────────────────────
+class ContextPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.mode = "presence"
+        self._orb_phase = 0.0
+        self.setMaximumWidth(0) # Initially hidden
+        self.setMinimumWidth(0)
+        
+        self.setStyleSheet(f"background: #020404; border-left: 1px solid {CYAN};")
+        
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(14, 14, 14, 14)
+        
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("border: none; background: transparent;")
+        self.lay.addWidget(self.stack)
+        
+        self.presence_widget = QWidget()
+        p_lay = QVBoxLayout(self.presence_widget)
+        p_lay.addStretch()
+        
+        self.orb = PresenceOrb()
+        p_lay.addWidget(self.orb, 0, Qt.AlignmentFlag.AlignHCenter)
+        
+        lbl_grace = GlowLabel("GRACE", CYAN_DIM, 9)
+        lbl_grace.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        p_lay.addWidget(lbl_grace)
+        
+        p_lay.addStretch()
+        self.stack.addWidget(self.presence_widget)
+        
+        self.scene_widget = QWidget()
+        s_lay = QVBoxLayout(self.scene_widget)
+        s_lay.setContentsMargins(0, 0, 0, 0)
+        
+        spaced_text = " ".join("◆ DETECTED CONTEXT: FILE OPERATION")
+        self.lbl_scene_top = GlowLabel(spaced_text, CYAN, 9)
+        s_lay.addWidget(self.lbl_scene_top)
+        
+        card = QWidget()
+        card.setStyleSheet(f"background: rgba(10, 22, 34, 0.4); border: 1px solid {BORDER}; border-radius: 4px;")
+        c_lay = QVBoxLayout(card)
+        c_lay.setContentsMargins(0, 0, 0, 0)
+        
+        header = QWidget()
+        header.setStyleSheet("background: #0a1622; border-bottom: 1px solid rgba(0, 212, 255, 0.2);")
+        h_lay = QVBoxLayout(header)
+        h_lay.setContentsMargins(8, 6, 8, 6)
+        lbl_preview = GlowLabel("[ DIRECTORY PREVIEW ]", CYAN_MID, 9)
+        lbl_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_lay.addWidget(lbl_preview)
+        c_lay.addWidget(header)
+        
+        self.lbl_tree = QLabel()
+        self.lbl_tree.setFont(mono(10))
+        self.lbl_tree.setStyleSheet("color: rgba(0, 212, 255, 0.8); background: transparent; border: none; padding: 10px;")
+        c_lay.addWidget(self.lbl_tree)
+        
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background: {BORDER};")
+        c_lay.addWidget(div)
+        
+        stats_widget = QWidget()
+        stats_widget.setStyleSheet("background: transparent; border: none;")
+        st_lay = QHBoxLayout(stats_widget)
+        st_lay.setContentsMargins(10, 8, 10, 8)
+        
+        self.lbl_free_space = GlowLabel("FREE SPACE: ---", CYAN_MID, 8)
+        self.lbl_last_backup = GlowLabel("LAST BACKUP: ---", CYAN_MID, 8)
+        st_lay.addWidget(self.lbl_free_space)
+        st_lay.addStretch()
+        st_lay.addWidget(self.lbl_last_backup)
+        c_lay.addWidget(stats_widget)
+        
+        s_lay.addWidget(card)
+        s_lay.addStretch()
+        self.stack.addWidget(self.scene_widget)
+
+    def update_audio(self, wave_data):
+        if self.mode == "presence" and wave_data:
+            amp = max(wave_data)
+            self.orb.set_amplitude(amp)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self.mode == "presence" and self.width() > 10:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(QPen(parse_color(CYAN, 30), 1))
+            
+            path = QPainterPath()
+            w, h = self.width(), self.height()
+            
+            path.moveTo(w*0.1, h*0.2)
+            path.lineTo(w*0.3, h*0.2)
+            path.lineTo(w*0.4, h*0.3)
+            
+            path.moveTo(w*0.8, h*0.7)
+            path.lineTo(w*0.6, h*0.7)
+            path.lineTo(w*0.5, h*0.6)
+            
+            p.drawPath(path)
+
+    sig_scene_done = pyqtSignal()
+
+    def set_presence_mode(self):
+        self.mode = "presence"
+        self.stack.setCurrentWidget(self.presence_widget)
+        self.sig_scene_done.emit()
+
+    def set_scene_mode(self, directory, file_changed, operation="NEW"):
+        import os
+        import shutil
+        from datetime import datetime
+        
+        self.mode = "scene"
+        
+        # Build REAL directory tree from the actual filesystem
+        self.lbl_tree.setTextFormat(Qt.TextFormat.RichText)
+        cyan_rgba = "rgba(0, 212, 255, 0.8)"
+        dim_cyan = "rgba(0, 212, 255, 0.5)"
+        
+        # Resolve actual directory path
+        real_dir = directory if os.path.isdir(directory) else os.path.dirname(directory)
+        dir_display = os.path.basename(real_dir) or real_dir
+        
+        tree_text = f"<span style='color:{cyan_rgba}'>└─ {dir_display}/</span><br>"
+        
+        # List REAL contents from the filesystem
+        try:
+            entries = sorted(os.listdir(real_dir))
+            dirs = [e for e in entries if os.path.isdir(os.path.join(real_dir, e)) and not e.startswith('.')]
+            files = [e for e in entries if os.path.isfile(os.path.join(real_dir, e)) and not e.startswith('.')]
+            
+            # Show up to 5 directories
+            for i, d in enumerate(dirs[:5]):
+                connector = "├" if (i < len(dirs[:5]) - 1 or files) else "└"
+                tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>{connector}─ {d}/</span><br>"
+            if len(dirs) > 5:
+                tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>├─ ... +{len(dirs) - 5} more</span><br>"
+            
+            # Show up to 5 files, highlight the changed one
+            shown_files = files[:5]
+            for i, f in enumerate(shown_files):
+                is_last = (i == len(shown_files) - 1 and len(files) <= 5)
+                connector = "└" if is_last else "├"
+                if f == file_changed:
+                    op_color = PINK if operation in ["NEW", "DELETE"] else AMBER
+                    tree_text += f"&nbsp;&nbsp;&nbsp;{connector}─ <span style='color:{cyan_rgba}'>{f}</span> <span style='color:{op_color}; font-size: 10px; font-weight: bold;'>[{operation}]</span><br>"
+                else:
+                    tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>{connector}─ {f}</span><br>"
+            
+            if len(files) > 5:
+                tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>└─ ... +{len(files) - 5} more files</span><br>"
+            
+            # If the changed file wasn't in the listing, add it at the bottom
+            if file_changed not in files and file_changed not in dirs:
+                op_color = PINK if operation in ["NEW", "DELETE"] else AMBER
+                tree_text += f"&nbsp;&nbsp;&nbsp;└─ <span style='color:{cyan_rgba}'>{file_changed}</span> <span style='color:{op_color}; font-size: 10px; font-weight: bold;'>[{operation}]</span><br>"
+                
+        except (PermissionError, FileNotFoundError):
+            tree_text += f"&nbsp;&nbsp;&nbsp;└─ <span style='color:{cyan_rgba}'>{file_changed}</span> <span style='color:{PINK}; font-size: 10px; font-weight: bold;'>[{operation}]</span><br>"
+        
+        self.lbl_tree.setText(tree_text)
+        
+        # Get REAL free space
+        try:
+            usage = shutil.disk_usage(real_dir)
+            free_gb = usage.free / (1024 ** 3)
+            if free_gb >= 1000:
+                free_str = f"{free_gb / 1024:.1f} TB"
+            else:
+                free_str = f"{free_gb:.1f} GB"
+        except Exception:
+            free_str = "N/A"
+        self.lbl_free_space.setText(f"FREE SPACE: {free_str}")
+        
+        # Get REAL last modified time of the file
+        try:
+            file_path = os.path.join(real_dir, file_changed)
+            if os.path.exists(file_path):
+                mtime = os.path.getmtime(file_path)
+                dt = datetime.fromtimestamp(mtime)
+                mod_str = dt.strftime("%Y-%m-%d %H:%M")
+            else:
+                mod_str = "JUST NOW"
+        except Exception:
+            mod_str = "N/A"
+        self.lbl_last_backup.setText(f"MODIFIED: {mod_str}")
+        
+        self.stack.setCurrentWidget(self.scene_widget)
+        
+        # Auto-revert to presence mode after 8 seconds
+        if hasattr(self, '_revert_timer'):
+            self._revert_timer.stop()
+        else:
+            self._revert_timer = QTimer(self)
+            self._revert_timer.setSingleShot(True)
+            self._revert_timer.timeout.connect(self.set_presence_mode)
+        self._revert_timer.start(8000)
+

@@ -31,7 +31,7 @@ def init_biometrics():
         pathlib.Path.symlink_to = _safe_symlink
         
         from speechbrain.inference.speaker import SpeakerRecognition
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
         # Download and load the pre-trained model
         VERIFICATION_MODEL = SpeakerRecognition.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
@@ -81,7 +81,7 @@ def verify_speaker(audio_data_int16, sample_rate=16000):
     
     # Load profile embedding
     profile_embedding = torch.load(PROFILE_PATH, weights_only=True)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
     profile_embedding = profile_embedding.to(device)
     
     with torch.no_grad():

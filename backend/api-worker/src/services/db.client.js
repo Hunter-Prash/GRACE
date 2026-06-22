@@ -1,8 +1,8 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { AWS_REGION } from '../config.js';
+import { getAwsRegion } from '../config.js';
 
-const client = new DynamoDBClient({ region: AWS_REGION });
+const client = new DynamoDBClient({ region: getAwsRegion() });
 export const docClient = DynamoDBDocumentClient.from(client);
 
 // Helper to get exact IST timestamp in ISO format

@@ -62,8 +62,16 @@ router.post('/chat', async (req, res) => {
 
         const result = await processChat(sessionId, text);
 
-        // Save to DB and check if it triggered the memory indexer
-        const indexerTriggered = await saveChatMessage(sessionId, text, result.text);
+        // Fire-and-forget: save to DB in background so the response flies back instantly
+        // Don't block the HTTP response waiting for DynamoDB to finish writing
+        let indexerTriggered = false;
+        saveChatMessage(sessionId, text, result.text)
+            .then(triggered => {
+                if (triggered) {
+                    console.log("[Indexer] Memory indexer was triggered by this message.");
+                }
+            })
+            .catch(e => console.error("Background save failed:", e));
 
         res.json({
             text: result.text,
@@ -73,7 +81,9 @@ router.post('/chat', async (req, res) => {
             dbContextItemsCount: result.dbContextItemsCount,
             toolsUsed: result.toolsUsed,
             indexerTriggered: indexerTriggered,
-            mapData: result.mapData
+            mapData: result.mapData,
+            searchData: result.searchData,
+            clientCommands: result.clientCommands
         });
 
     } catch (error) {
