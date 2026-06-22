@@ -47,10 +47,11 @@ export const runMemoryIndexer = async (unindexedConversations) => {
     const summarizationPrompt = `
 You are a memory archivist for Grace, a Life OS. 
 Write a comprehensive, dense paragraph summarizing all the concrete facts, life events, decisions, and preferences from the NEW TRANSCRIPT.
-Completely ignore small talk, greetings, filler words, and routine task outputs. 
+Completely ignore small talk, greetings, filler words, and routine task outputs. But if the user is letting his emotions out or updating about a genral life events(like going on a trip / watching a movie/ completing a game etc...) then KEEP IT..
 Do NOT use bullet points. Write a continuous narrative summary.
 CRITICAL INSTRUCTION 1: Include the current date [${todayIST}] contextually if recording new events.
-CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, text snippets, news articles, file contents, code blocks, or directory listings (e.g. from local file system tools), COMPLETELY IGNORE THEM. IGNORE all local file changes (creation+updates) done via MCP server.Do NOT summarize or index web search content or local file outputs. Only index personal facts, goals, and user-specific data.
+CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, news articles, file contents, code blocks, or directory listings (e.g. from local file system tools), COMPLETELY IGNORE THEM. IGNORE  local file changes (creation+deletes) done via MCP server.Do NOT summarize or index web search content or local file outputs. Only index personal facts, goals, and user-specific data.
+CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifically asked GRACE to remember .. Even if its a web search/local file system updates /articles/ etc.... do not remove them ... 
     `;
 
     for (let i = 0; i < rawBatches.length; i++) {

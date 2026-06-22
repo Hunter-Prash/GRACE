@@ -9,6 +9,7 @@ import json
 import os
 import webbrowser
 from datetime import datetime, timezone, timedelta
+from PyQt6.QtCore import Qt
 
 IST = timezone(timedelta(hours=5, minutes=30))
 from core.config import (
@@ -62,13 +63,13 @@ async def pipeline_async(hud):
         init_biometrics()
     except Exception as e:
         print(f"Failed to initialize biometrics: {e}")
-        
+
     import gc
     import torch
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        
+
     from core.audio import oww_model
 
     audio = pyaudio.PyAudio()
@@ -81,7 +82,7 @@ async def pipeline_async(hud):
 
     # Initial boot text, wait for Node.js API to provide history if needed later
     hud.add_message("GRACE", "Booting system... Connecting to Core Backend.")
-    
+
     try:
         def fetch_history():
             return requests.get(f"{API_STATE['url']}/api/history/default", timeout=5).json()
@@ -94,7 +95,7 @@ async def pipeline_async(hud):
             db_history = db_response
         else:
             db_history = []
-            
+
         if isinstance(db_history, list):
             hud._loading_history = True
             last_grace_text = None
@@ -108,9 +109,9 @@ async def pipeline_async(hud):
                 hud.add_message(speaker, text)
                 if speaker == "GRACE":
                     last_grace_text = text
-            
+
             hud.finish_history_load()
-            
+
             if last_grace_text:
                 # Pre-generate audio for the very last message in history so you can replay it
                 boot_audio = await synthesize_speech(last_grace_text)
@@ -119,7 +120,7 @@ async def pipeline_async(hud):
                 ).start())
     except Exception as e:
         pass
-        
+
     # ── DAILY BRIEFING ENGINE ──
     # Check if this is the first boot of the day
     try:
@@ -129,37 +130,37 @@ async def pipeline_async(hud):
         if os.path.exists(quota_path):
             with open(quota_path, "r") as f:
                 quota_data = json.load(f)
-                
+
         last_briefing = quota_data.get("last_briefing_date", "")
         if last_briefing != today_ist:
             print("[SYSTEM] First boot of the day detected. Initializing Daily Briefing Sequence.")
-            
+
             # 1. Fetch raw goals data from backend for the UI Side Panel
             def fetch_goals():
                 try:
                     return requests.get(f"{API_STATE['url']}/api/goals/active", timeout=5).json()
                 except Exception:
                     return None
-                    
+
             goals_data = await asyncio.to_thread(fetch_goals)
-            
+
             if goals_data:
                 # 2. Trigger the Frosted Glass Side Panel
                 hud.sig_show_briefing_panel.emit(goals_data)
-                
+
                 # 3. Inject the background system prompt to Grace
                 briefing_prompt = (
                     "SYSTEM PROMPT: This is the first boot of the day. Please provide Prashant his morning briefing. "
                     "Use your getActiveGoals tool to estimate completion times, and use your Pinecone memory to "
                     "recall his activities from the past two days. Summarize this briefly and speak naturally."
                 )
-                
+
                 # We defer injecting it slightly to let the HUD settle
                 async def inject_briefing():
                     await asyncio.sleep(1.0)
                     hud.sig_text_input.emit(briefing_prompt)
                 asyncio.create_task(inject_briefing())
-                
+
                 # 4. Save today's date so it doesn't trigger again
                 quota_data["last_briefing_date"] = today_ist
                 with open(quota_path, "w") as f:
@@ -176,17 +177,17 @@ async def pipeline_async(hud):
     spk_stream.start_stream()
     hud.set_state(STATE_IDLE)
 
-    from PyQt6.QtCore import Qt
+  
     text_input_queue = queue.Queue()
     hud.sig_text_input.connect(lambda t: text_input_queue.put(t), type=Qt.ConnectionType.DirectConnection)
-    
+
     cmd_queue = queue.Queue()
     hud.sig_force_sleep.connect(lambda: cmd_queue.put("SLEEP"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_clear_dynamo.connect(lambda: cmd_queue.put("CLEAR_DYNAMO"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_clear_pinecone.connect(lambda: cmd_queue.put("CLEAR_PINECONE"), type=Qt.ConnectionType.DirectConnection)
     hud.sig_env_toggle.connect(_on_env_toggle, type=Qt.ConnectionType.DirectConnection)
     hud.sig_env_toggle.connect(lambda m: cmd_queue.put("RELOAD_HISTORY"), type=Qt.ConnectionType.DirectConnection)
-    
+
     # 3-second rolling buffer for speaker verification (approx 40 chunks if 1280 chunk_size)
     audio_buffer = deque(maxlen=40)
 
@@ -205,7 +206,7 @@ async def pipeline_async(hud):
                 is_text_cmd = True
             except queue.Empty:
                 pass
-                
+
             try:
                 sys_cmd = cmd_queue.get_nowait()
                 if sys_cmd == "SLEEP":
@@ -240,7 +241,7 @@ async def pipeline_async(hud):
                             db_history = db_response
                         else:
                             db_history = []
-                            
+
                         if isinstance(db_history, list):
                             hud._loading_history = True
                             for msg in db_history:
@@ -273,7 +274,7 @@ async def pipeline_async(hud):
                     data = mic_queue.get(timeout=0.1)
                     pcm  = np.frombuffer(data, dtype=np.int16)
                     audio_buffer.append(pcm)
-                    
+
                     pred = oww_model.predict(pcm)
                     if pred['hey_mycroft'] > 0.75:
                         if has_voice_profile():
@@ -291,10 +292,10 @@ async def pipeline_async(hud):
                                 hud.set_state(STATE_IDLE)
                         else:
                             active_session = True
-                            
+
                         if active_session:
                             audio_buffer.clear()
-                            
+
                 except queue.Empty:
                     continue
 
@@ -333,10 +334,10 @@ async def pipeline_async(hud):
 
                 try:
                     def make_api_call(text):
-                        return requests.post(f"{API_STATE['url']}/api/chat", json={"text": text, "sessionId": "default"}, timeout=30).json()
+                        return requests.post(f"{API_STATE['url']}/api/chat", json={"text": text, "sessionId": "default"}, timeout=120).json()
 
                     response = await asyncio.to_thread(make_api_call, user_cmd)
-                    
+
                     if "error" in response:
                         raise Exception(response["error"])
 
@@ -347,13 +348,13 @@ async def pipeline_async(hud):
                     map_data = response.get("mapData")
                     if map_data:
                         hud.sig_map_update.emit(map_data)
-                        
+
                     search_data = response.get("searchData")
                     print(f"[DEBUG] searchData received: {bool(search_data)}, keys: {list(search_data.keys()) if search_data else 'None'}")
                     if search_data:
                         print(f"[DEBUG] Emitting sig_search_update with {len(search_data.get('results', []))} results and {len(search_data.get('images', []))} images")
                         hud.sig_search_update.emit(search_data)
-                        
+
                     client_commands = response.get("clientCommands", [])
                     for cmd in client_commands:
                         if cmd.get("type") == "openResource":
@@ -372,46 +373,56 @@ async def pipeline_async(hud):
                                 exe = app_dictionary.get(resource_name.lower().strip())
                                 if exe:
                                     os.system(f'start "" "{exe}"')
-                    
+                        elif cmd.get("type") == "fileOperation":
+                            hud.sig_context_scene.emit(cmd.get("data", {}))
+
                     # Track metrics and costs
                     req_in = response.get("inputTokens", 0)
                     req_out = response.get("outputTokens", 0)
                     session_input_tokens += req_in
                     session_output_tokens += req_out
-                    total_cost = (session_input_tokens * 0.075 / 1000000) + (session_output_tokens * 0.30 / 1000000)
+                    in_cost = (session_input_tokens * 0.075 / 1000000)
+                    out_cost = (session_output_tokens * 0.30 / 1000000)
+                    total_cost = in_cost + out_cost
                     hud.sig_metrics.emit(session_input_tokens + session_output_tokens, total_cost)
-                    
+
                     # Rate Limit Sliding Window Tracker
                     curr_time = time.time()
                     rate_limit_tracker.append((curr_time, req_in + req_out))
                     while rate_limit_tracker and curr_time - rate_limit_tracker[0][0] > 60:
                         rate_limit_tracker.popleft()
-                    
+
                     rpm = len(rate_limit_tracker)
                     tpm = sum(t for _, t in rate_limit_tracker)
                     if rpm >= 12 or tpm >= 200000:
                         if curr_time - last_toaster_time > 10:
-                            hud.sig_alert_toaster.emit(f"⚠️ 80% RATE LIMIT REACHED ⚠️\n{rpm}/15 RPM | {tpm:,}/250K TPM")
+                            msg = f"⚠️ 80% RATE LIMIT REACHED ⚠️\n{rpm}/15 RPM | {tpm:,}/250K TPM"
+                            hud.sig_alert_toaster.emit(msg)
                             last_toaster_time = curr_time
-                    
+
                     # Track new telemetry
                     if "dbLatencyMs" in response:
                         hud.sig_db_latency.emit(response["dbLatencyMs"])
                     if "dbContextItemsCount" in response:
                         hud.sig_context_saturation.emit(response["dbContextItemsCount"])
-                    
+
                     if response.get("indexerTriggered"):
-                        hud.sig_alert_toaster.emit("🧠 MEMORY INDEXER TRIGGERED 🧠\nCompiling 40-message context to Pinecone.")
-                    
+                        msg = "🧠 MEMORY INDEXER TRIGGERED 🧠\nCompiling 40-message context to Pinecone."
+                        hud.sig_alert_toaster.emit(msg)
+
                     hud.set_state(STATE_SPEAKING)
-                    
+
                     from core.audio import stream_synthesize_and_play
-                    interrupted, audio_bytes = await stream_synthesize_and_play(text_answer, hud, text_input_queue, cmd_queue)
-                    
+                    interrupted, audio_bytes = await stream_synthesize_and_play(
+                        text_answer, hud, text_input_queue, cmd_queue
+                    )
+
                     # Attach play button trigger to the latest bubble after it finishes generating
-                    hud.attach_play_button_to_latest(lambda checked=False, ab=audio_bytes: threading.Thread(
-                        target=play_audio_sync, args=(ab, hud), daemon=True
-                    ).start())
+                    hud.attach_play_button_to_latest(
+                        lambda checked=False, ab=audio_bytes: threading.Thread(
+                            target=play_audio_sync, args=(ab, hud), daemon=True
+                        ).start()
+                    )
 
                     if not interrupted:
                         await asyncio.sleep(0.5)
@@ -422,7 +433,7 @@ async def pipeline_async(hud):
                     hud.set_state(STATE_LISTENING if interrupted else STATE_IDLE)
 
                 except requests.exceptions.RequestException as e:
-                    hud.add_message("GRACE", f"Backend Connection Error. Ensure Node.js server is running.")
+                    hud.add_message("GRACE", "Backend Connection Error. Ensure Node.js server is running.")
                     active_session = False
                     hud.set_state(STATE_IDLE)
 

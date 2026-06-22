@@ -30,12 +30,29 @@ class CyberPanel(QFrame):
         self.label = label
         self.glow  = glow
         self.setStyleSheet("background: transparent; border: none;")
+        self.header_widgets = []
         
         self._phase = 0.0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(50)
         
+    def add_header_widget(self, widget):
+        widget.setParent(self)
+        self.header_widgets.append(widget)
+        self._reposition_header_widgets()
+        widget.show()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._reposition_header_widgets()
+
+    def _reposition_header_widgets(self):
+        offset_right = 10
+        for w in reversed(self.header_widgets):
+            w.move(self.width() - offset_right - w.width(), 4)
+            offset_right += w.width() + 5
+
     def _tick(self):
         self._phase = (self._phase + 0.05) % (2 * math.pi)
         self.update()
@@ -1581,7 +1598,9 @@ class HoloCard(QWidget):
         link.setFont(mono(8))
         link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
         link.setCursor(Qt.CursorShape.PointingHandCursor)
-        link.mousePressEvent = lambda e: QDesktopServices.openUrl(QUrl(self.url))
+        def _open_link(e, u=self.url):
+            QDesktopServices.openUrl(QUrl(u))
+        link.mousePressEvent = _open_link
         lay.addWidget(link)
 
     def paintEvent(self, event):
@@ -2028,3 +2047,293 @@ class CircuitBoardBackground(QWidget):
             px = lx1 + (lx2 - lx1) * t
             py = ly1 + (ly2 - ly1) * t
             painter.drawEllipse(QPoint(int(px), int(py)), 2, 2)
+
+
+# ──────────────────────────────────────────
+# PRESENCE ORB WIDGET (Expanding Ripple Rings)
+# ──────────────────────────────────────────
+class PresenceOrb(QWidget):
+    NUM_RINGS = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(140, 140)
+        self._phase = 0.0
+        self._amplitude = 0.0
+        self._color = CYAN
+        self._core_radius = 28
+        self._max_ring_expand = 30  # how far rings travel outward
+
+        # 60fps internal timer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(16)
+
+    def _tick(self):
+        # Speed scales with amplitude: idle ~0.01, speaking ~0.02-0.035
+        speed = 0.01 + self._amplitude * 0.025
+        self._phase += speed
+        self.update()
+
+    def set_phase(self, phase):
+        # Keep for compatibility but internal timer drives animation
+        pass
+
+    def set_amplitude(self, amp):
+        self._amplitude = min(1.0, max(0.0, amp))
+
+    def set_color(self, hex_color):
+        self._color = hex_color
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx, cy = self.width() / 2, self.height() / 2
+
+        amp = self._amplitude
+        phase = self._phase
+
+        # Dynamic core: breathes gently, swells with amplitude
+        breath = (math.sin(phase * 2.0) + 1) / 2  # 0..1
+        core_r = self._core_radius + breath * 3 + amp * 6
+
+        # Soft inner glow fill
+        glow_alpha = int(15 + breath * 20 + amp * 40)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(parse_color(self._color, glow_alpha))
+        gr = core_r + 8 + amp * 12
+        p.drawEllipse(QPointF(cx, cy), gr, gr)
+
+        # Core circle outline
+        core_alpha = int(160 + breath * 40 + amp * 55)
+        core_width = 1.5 + amp * 0.5
+        p.setPen(QPen(parse_color(self._color, min(255, core_alpha)), core_width))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(cx, cy), core_r, core_r)
+
+        # --- Three expanding ripple rings ---
+        # Each ring is staggered by 1/3 of a cycle
+        max_expand = self._max_ring_expand + amp * 20
+        for i in range(self.NUM_RINGS):
+            # Stagger each ring evenly across the cycle
+            ring_phase = (phase + i * (2 * math.pi / self.NUM_RINGS)) % (2 * math.pi)
+            # Normalize to 0..1 (one full expansion cycle)
+            t = ring_phase / (2 * math.pi)
+
+            ring_r = core_r + t * max_expand
+            # Fade out as ring expands: full alpha at t=0, zero at t=1
+            ring_alpha = int((1.0 - t) * (100 + amp * 100))
+            ring_width = max(0.5, (1.0 - t) * (1.5 + amp * 1.0))
+
+            if ring_alpha > 2:
+                p.setPen(QPen(parse_color(self._color, min(255, ring_alpha)), ring_width))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
+
+        p.end()
+
+# ──────────────────────────────────────────
+# CONTEXT PANEL (Togglable Split View)
+# ──────────────────────────────────────────
+class ContextPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.mode = "presence"
+        self._orb_phase = 0.0
+        self.setMaximumWidth(0) # Initially hidden
+        self.setMinimumWidth(0)
+        
+        self.setStyleSheet(f"background: #020404; border-left: 1px solid {CYAN};")
+        
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(14, 14, 14, 14)
+        
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("border: none; background: transparent;")
+        self.lay.addWidget(self.stack)
+        
+        self.presence_widget = QWidget()
+        p_lay = QVBoxLayout(self.presence_widget)
+        p_lay.addStretch()
+        
+        self.orb = PresenceOrb()
+        p_lay.addWidget(self.orb, 0, Qt.AlignmentFlag.AlignHCenter)
+        
+        lbl_grace = GlowLabel("GRACE", CYAN_DIM, 9)
+        lbl_grace.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        p_lay.addWidget(lbl_grace)
+        
+        p_lay.addStretch()
+        self.stack.addWidget(self.presence_widget)
+        
+        self.scene_widget = QWidget()
+        s_lay = QVBoxLayout(self.scene_widget)
+        s_lay.setContentsMargins(0, 0, 0, 0)
+        
+        spaced_text = " ".join("◆ DETECTED CONTEXT: FILE OPERATION")
+        self.lbl_scene_top = GlowLabel(spaced_text, CYAN, 9)
+        s_lay.addWidget(self.lbl_scene_top)
+        
+        card = QWidget()
+        card.setStyleSheet(f"background: rgba(10, 22, 34, 0.4); border: 1px solid {BORDER}; border-radius: 4px;")
+        c_lay = QVBoxLayout(card)
+        c_lay.setContentsMargins(0, 0, 0, 0)
+        
+        header = QWidget()
+        header.setStyleSheet("background: #0a1622; border-bottom: 1px solid rgba(0, 212, 255, 0.2);")
+        h_lay = QVBoxLayout(header)
+        h_lay.setContentsMargins(8, 6, 8, 6)
+        lbl_preview = GlowLabel("[ DIRECTORY PREVIEW ]", CYAN_MID, 9)
+        lbl_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_lay.addWidget(lbl_preview)
+        c_lay.addWidget(header)
+        
+        self.lbl_tree = QLabel()
+        self.lbl_tree.setFont(mono(10))
+        self.lbl_tree.setStyleSheet("color: rgba(0, 212, 255, 0.8); background: transparent; border: none; padding: 10px;")
+        c_lay.addWidget(self.lbl_tree)
+        
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background: {BORDER};")
+        c_lay.addWidget(div)
+        
+        stats_widget = QWidget()
+        stats_widget.setStyleSheet("background: transparent; border: none;")
+        st_lay = QHBoxLayout(stats_widget)
+        st_lay.setContentsMargins(10, 8, 10, 8)
+        
+        self.lbl_free_space = GlowLabel("FREE SPACE: ---", CYAN_MID, 8)
+        self.lbl_last_backup = GlowLabel("LAST BACKUP: ---", CYAN_MID, 8)
+        st_lay.addWidget(self.lbl_free_space)
+        st_lay.addStretch()
+        st_lay.addWidget(self.lbl_last_backup)
+        c_lay.addWidget(stats_widget)
+        
+        s_lay.addWidget(card)
+        s_lay.addStretch()
+        self.stack.addWidget(self.scene_widget)
+
+    def update_audio(self, wave_data):
+        if self.mode == "presence" and wave_data:
+            amp = max(wave_data)
+            self.orb.set_amplitude(amp)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self.mode == "presence" and self.width() > 10:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(QPen(parse_color(CYAN, 30), 1))
+            
+            path = QPainterPath()
+            w, h = self.width(), self.height()
+            
+            path.moveTo(w*0.1, h*0.2)
+            path.lineTo(w*0.3, h*0.2)
+            path.lineTo(w*0.4, h*0.3)
+            
+            path.moveTo(w*0.8, h*0.7)
+            path.lineTo(w*0.6, h*0.7)
+            path.lineTo(w*0.5, h*0.6)
+            
+            p.drawPath(path)
+
+    sig_scene_done = pyqtSignal()
+
+    def set_presence_mode(self):
+        self.mode = "presence"
+        self.stack.setCurrentWidget(self.presence_widget)
+        self.sig_scene_done.emit()
+
+    def set_scene_mode(self, directory, file_changed, operation="NEW"):
+        import os
+        import shutil
+        from datetime import datetime
+        
+        self.mode = "scene"
+        
+        # Build REAL directory tree from the actual filesystem
+        self.lbl_tree.setTextFormat(Qt.TextFormat.RichText)
+        cyan_rgba = "rgba(0, 212, 255, 0.8)"
+        dim_cyan = "rgba(0, 212, 255, 0.5)"
+        
+        # Resolve actual directory path
+        real_dir = directory if os.path.isdir(directory) else os.path.dirname(directory)
+        dir_display = os.path.basename(real_dir) or real_dir
+        
+        tree_text = f"<span style='color:{cyan_rgba}'>└─ {dir_display}/</span><br>"
+        
+        # List REAL contents from the filesystem
+        try:
+            entries = sorted(os.listdir(real_dir))
+            dirs = [e for e in entries if os.path.isdir(os.path.join(real_dir, e)) and not e.startswith('.')]
+            files = [e for e in entries if os.path.isfile(os.path.join(real_dir, e)) and not e.startswith('.')]
+            
+            # Show up to 5 directories
+            for i, d in enumerate(dirs[:5]):
+                connector = "├" if (i < len(dirs[:5]) - 1 or files) else "└"
+                tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>{connector}─ {d}/</span><br>"
+            if len(dirs) > 5:
+                tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>├─ ... +{len(dirs) - 5} more</span><br>"
+            
+            # Show up to 5 files, highlight the changed one
+            shown_files = files[:5]
+            for i, f in enumerate(shown_files):
+                is_last = (i == len(shown_files) - 1 and len(files) <= 5)
+                connector = "└" if is_last else "├"
+                if f == file_changed:
+                    op_color = PINK if operation in ["NEW", "DELETE"] else AMBER
+                    tree_text += f"&nbsp;&nbsp;&nbsp;{connector}─ <span style='color:{cyan_rgba}'>{f}</span> <span style='color:{op_color}; font-size: 10px; font-weight: bold;'>[{operation}]</span><br>"
+                else:
+                    tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>{connector}─ {f}</span><br>"
+            
+            if len(files) > 5:
+                tree_text += f"&nbsp;&nbsp;&nbsp;<span style='color:{dim_cyan}'>└─ ... +{len(files) - 5} more files</span><br>"
+            
+            # If the changed file wasn't in the listing, add it at the bottom
+            if file_changed not in files and file_changed not in dirs:
+                op_color = PINK if operation in ["NEW", "DELETE"] else AMBER
+                tree_text += f"&nbsp;&nbsp;&nbsp;└─ <span style='color:{cyan_rgba}'>{file_changed}</span> <span style='color:{op_color}; font-size: 10px; font-weight: bold;'>[{operation}]</span><br>"
+                
+        except (PermissionError, FileNotFoundError):
+            tree_text += f"&nbsp;&nbsp;&nbsp;└─ <span style='color:{cyan_rgba}'>{file_changed}</span> <span style='color:{PINK}; font-size: 10px; font-weight: bold;'>[{operation}]</span><br>"
+        
+        self.lbl_tree.setText(tree_text)
+        
+        # Get REAL free space
+        try:
+            usage = shutil.disk_usage(real_dir)
+            free_gb = usage.free / (1024 ** 3)
+            if free_gb >= 1000:
+                free_str = f"{free_gb / 1024:.1f} TB"
+            else:
+                free_str = f"{free_gb:.1f} GB"
+        except Exception:
+            free_str = "N/A"
+        self.lbl_free_space.setText(f"FREE SPACE: {free_str}")
+        
+        # Get REAL last modified time of the file
+        try:
+            file_path = os.path.join(real_dir, file_changed)
+            if os.path.exists(file_path):
+                mtime = os.path.getmtime(file_path)
+                dt = datetime.fromtimestamp(mtime)
+                mod_str = dt.strftime("%Y-%m-%d %H:%M")
+            else:
+                mod_str = "JUST NOW"
+        except Exception:
+            mod_str = "N/A"
+        self.lbl_last_backup.setText(f"MODIFIED: {mod_str}")
+        
+        self.stack.setCurrentWidget(self.scene_widget)
+        
+        # Auto-revert to presence mode after 8 seconds
+        if hasattr(self, '_revert_timer'):
+            self._revert_timer.stop()
+        else:
+            self._revert_timer = QTimer(self)
+            self._revert_timer.setSingleShot(True)
+            self._revert_timer.timeout.connect(self.set_presence_mode)
+        self._revert_timer.start(8000)
+

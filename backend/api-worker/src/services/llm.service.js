@@ -242,6 +242,19 @@ Filter every career-related response through this question: "How does this move 
                 }
             },
             {
+                name: "detectFileOperation",
+                description: "Triggers the scene_mode context panel in the GUI to show a directory preview. Call this when you perform or detect ANY file operation including reading, viewing, creation, modification, or deletion.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        directory: { type: "STRING", description: "The FULL absolute path of the directory containing the file (e.g. 'D:/PERSONAL/GRACE/core')" },
+                        file_changed: { type: "STRING", description: "Just the filename, not the full path (e.g. 'hello.txt')" },
+                        operation: { type: "STRING", description: "The type of operation: 'NEW' for creation, 'MODIFIED' for edits, 'DELETE' for deletion, 'READ' for reading/viewing" }
+                    },
+                    required: ["directory", "file_changed", "operation"]
+                }
+            },
+            {
                 name: "getCurrentDateTime",
                 description: "Gets the exact current date and time in IST (Indian Standard Time). Can also calculate future or past dates by providing an offset in days. Use this whenever the user asks about the current date, time, or asks questions like 'a month from now', 'few days from now', etc.",
                 parameters: {
@@ -365,6 +378,11 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const args = call.args || {};
                     const res = getCurrentDateTime(args.offsetDays || 0);
                     toolResult = { success: true, datetime: res };
+                }
+                else if (call.name === 'detectFileOperation') {
+                    const args = call.args;
+                    clientCommands.push({ type: 'fileOperation', data: args });
+                    toolResult = { success: true, message: `Triggered file operation UI context for ${args.file_changed}` };
                 }
                 else {
                     // Assume it's an MCP tool if it's not a hardcoded local tool
