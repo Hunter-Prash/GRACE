@@ -60,7 +60,7 @@ export default function App() {
         fetchChat()
     }, [])
 
-
+    //sam deploy --stack-name grace-backend-stack --no-confirm-changeset --resolve-s3 --capabilities CAPABILITY_IAM
 
     return (
         <div className="relative flex flex-col h-[100dvh] bg-[#020404] text-cyan-50 font-sans selection:bg-cyan-900 selection:text-cyan-50 overflow-hidden">
@@ -75,7 +75,7 @@ export default function App() {
 
             {loading && (
                 <div className="flex justify-center items-center py-2 z-10 shrink-0">
-                    <motion.div 
+                    <motion.div
                         className="flex items-center gap-3 px-5 py-2 rounded-full border border-cyan-500/50 bg-cyan-950/40 shadow-[0_0_15px_rgba(34,211,238,0.2)] backdrop-blur-md"
                         animate={{ opacity: [0.6, 1, 0.6] }}
                         transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}

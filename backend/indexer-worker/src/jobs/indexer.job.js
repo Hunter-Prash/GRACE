@@ -117,7 +117,7 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
         if (pineconeRes && pineconeRes.result && pineconeRes.result.hits && pineconeRes.result.hits.length > 0) {
             // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.35 threshold to drop semantically near-identical duplicates.
             const score = pineconeRes.result.hits[0]._score || pineconeRes.result.hits[0]._score;
-            if (score > 0.35) {
+            if (score > 0.45) {
                 isDuplicate = true;
                 duplicatesDropped++;
                 console.log(`[Indexer] Chunk ${idx + 1} is a duplicate (score: ${score.toFixed(3)}). Dropping.`);
