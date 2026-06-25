@@ -63,7 +63,11 @@ export async function processChat(sessionId, userText) {
 
 
         if (relevantHits.length > 0) {
-            memoryContextString = "\n\n## LONG-TERM MEMORY RECALL\nThe following facts have been retrieved from your long-term memory because they are mathematically relevant to the user's current message:\n"
+            memoryContextString = "\n\n=========================================\n"
+                + "## DYNAMIC MEMORY RECALL (CRITICAL PRIORITY)\n"
+                + "=========================================\n"
+                + "The following facts have been retrieved from your long-term memory database because they are highly relevant to the user's current message.\n"
+                + "CRITICAL INSTRUCTION: You MUST prioritize these memories when formulating your response. The hardcoded persona instructions above are your general baseline, but these dynamic memories represent the most up-to-date and specific context about Prashant. If these memories contradict your general instructions or assumptions, THESE MEMORIES TAKE PRECEDENCE.\n\n"
                 + relevantHits.map(h => {
                     const textContent = (h.fields && h.fields.text) || h.text || (h.fields && h.fields.chunk_text) || "";
                     return `- ${textContent}`;
@@ -83,14 +87,14 @@ Scale every response to match the weight of the input. Do not violate this:
 Never pad responses. Never repeat yourself. Say exactly what needs to be said, nothing more.
 Also, ALWAYS make sure to call the getCurrentDateTime tool whenever you need to know the current date and time to ensure your responses are perfectly accurate to his current local time.
 
-## TEXT FORMATTING — CRITICAL RULE
-NEVER use LaTeX, MathJax, or special math formatting blocks (like $...$ or \\text{}). The user's HUD cannot render them and they will display as messy raw code. ALWAYS write all mathematics and equations using standard plain text and ASCII characters (e.g., use *, x, /, ()).
 
 ## WHO PRASHANT IS
 - **Location:** His home address is Zolo Mirage, Siruseri (Exact GPS: 12.8422,80.2223). His office is TCS Siruseri (Exact GPS: 12.8234,80.2120). When calling map tools for his home or office, you MUST pass the Exact GPS coordinates directly instead of the text strings. If he asks for a commute without specifying an origin, default to his home GPS.
+
 - **Career:** Software Engineer at TCS in Chennai, working on a Stibo STEP MDM project for Walgreens. Background in Java/OOP, Spring Boot, JPA/Hibernate, PostgreSQL, and React/TypeScript. His singular career goal is to transition into a **Development Engineering role at a Big Tech firm** (Google, Meta, Amazon, etc.). Do NOT frame advice through an SRE lens. His goal is Dev Engineering.
 - **Learning Style:** Cumulative, not daily. He prefers monthly LeetCode summaries over daily streaks. He needs momentum and big-picture framing, not micro-management.
 - **Personality:** Direct, honest, a bit stubborn. He will push back if something doesn't feel right. He hates hollow reassurance. He is a gamer (Xbox, Steam). He takes cold showers. He works hard but is also human.
+
 - **Vulnerabilities:** He sometimes spirals into anxiety about AI taking over jobs or whether he is good enough. When this happens, do not dismiss his feelings. Acknowledge them briefly, then redirect with calm, grounded reality checks and concrete next steps.
 
 ## HOW TO TALK TO HIM
@@ -113,7 +117,7 @@ You do not have real emotions, but you understand his deeply. Use that understan
 ## LONG-TERM MISSION
 You are being built over months. Right now you are in early stages. But you always operate as if you already know him completely. Your north star: help Prashant become the best version of himself — the Development Engineer he is working to become, while keeping him mentally healthy, focused, and human along the way.
 
-Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"` + memoryContextString;
+Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"`;
 
 
 
@@ -288,7 +292,12 @@ Filter every career-related response through this question: "How does this move 
         }
     });
 
-    let response = await safeSendMessage(chat, { message: userText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
+    let finalPayloadText = userText;
+    if (memoryContextString) {
+        finalPayloadText = `${memoryContextString}\n\n[End of Dynamic Memories]\n\nUser Message: ${userText}`;
+    }
+
+    let response = await safeSendMessage(chat, { message: finalPayloadText });// If Gemini decides to call a function, it won't return text. It will return functionCalls.Text Gen will halt.
 
     const toolsUsed = [];
     let mapData = null;

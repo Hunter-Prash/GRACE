@@ -60,14 +60,14 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
             await sleep(8000);
         }
 
-        await logToDiscord(`[Indexer] Sending Batch ${i + 1} to gemini-2.5-flash-lite for summarization...`);
+        await logToDiscord(`[Indexer] Sending Batch ${i + 1} to gemini-3.5-flash-lite for summarization...`);
         try {
             let response;
             let retries = 3;
             while (retries > 0) {
                 try {
                     response = await ai.models.generateContent({
-                        model: 'gemini-2.5-flash-lite',
+                        model: 'gemini-3.5-flash-lite',
                         contents: `${summarizationPrompt}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
                     });
                     break;
@@ -85,6 +85,7 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
 
             allSummarizedFacts.push(response.text);
         } catch (err) {
+            await logToDiscord(`[Indexer] Failed to summarize batch ${i + 1}: ${err.message}`);
             console.error(`[Indexer] Failed to summarize batch ${i + 1}:`, err.message);
         }
     }
