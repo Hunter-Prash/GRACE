@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QPainter, QPen, QFont, QShortcut, QKeySequence
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import ContextPanel, GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow, CircuitBoardBackground
+from gui.components import ContextPanel, GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow, HoloCalendarWidget, CircuitBoardBackground, CyberTerminal
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -31,6 +31,9 @@ class GraceHUD(QMainWindow):
     sig_show_briefing_panel = pyqtSignal(dict)
     sig_env_toggle = pyqtSignal(str)
     sig_context_scene = pyqtSignal(dict)
+    sig_context_scene = pyqtSignal(dict)
+    sig_terminal_log = pyqtSignal(str, str)
+    sig_calendar_update = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -411,6 +414,10 @@ class GraceHUD(QMainWindow):
         lay3.addStretch()
         tabs.addTab(tab3, "DATABASES")
 
+        # Tab 4: PIPELINE TERMINAL (Cyberpunk aesthetic terminal)
+        self.cyber_terminal = CyberTerminal()
+        tabs.addTab(self.cyber_terminal, "TERMINAL")
+
         return tabs
 
     def _right_panel(self):
@@ -538,6 +545,7 @@ class GraceHUD(QMainWindow):
         self.sig_wave.connect(self.context_panel.update_audio)
         self.sig_map_update.connect(self.map_pane.process_map_data)
         self.sig_search_update.connect(self._show_search_hologram)
+        self.sig_calendar_update.connect(self._show_calendar_hologram)
         self.map_pane.sig_data_ready.connect(lambda: self.map_tab.set_glow(True))
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
         self.sig_context_saturation.connect(lambda count: self.bar_context.set_value(count))
@@ -545,6 +553,7 @@ class GraceHUD(QMainWindow):
         self.sig_clear_context.connect(self.clear_chat_ui)
         self.sig_show_briefing_panel.connect(self.briefing_pane.slide_in)
         self.sig_context_scene.connect(self._on_context_scene)
+        self.sig_terminal_log.connect(self._on_terminal_log)
         self.context_panel.sig_scene_done.connect(self._on_scene_done)
         self.btn_shutdown.clicked.connect(self.close)
         self.btn_train.clicked.connect(self._open_enrollment)
@@ -834,18 +843,28 @@ class GraceHUD(QMainWindow):
             self.sig_env_toggle.emit("LOCAL")
 
     def _show_search_hologram(self, search_data):
-        print(f"[DEBUG] _show_search_hologram TRIGGERED! Data keys: {list(search_data.keys())}", flush=True)
         try:
+            print(f"[DEBUG] _show_search_hologram TRIGGERED! Data keys: {list(search_data.keys())}", flush=True)
             hw = HoloSearchWindow(search_data)
-            self.search_windows.append(hw)
-            hw.finished.connect(lambda: self.search_windows.remove(hw) if hw in self.search_windows else None)
-            hw.show()
+            hw.exec()
             print("[DEBUG] HoloSearchWindow instantiated and show() called successfully.", flush=True)
         except Exception as e:
-            print(f"[DEBUG] ERROR in _show_search_hologram: {e}", flush=True)
+            print(f"[ERROR] failed to show HoloSearchWindow: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+
+    def _show_calendar_hologram(self, calendar_data):
+        try:
+            cw = HoloCalendarWidget(calendar_data)
+            cw.exec()
+        except Exception as e:
+            print(f"[ERROR] failed to show HoloCalendarWidget: {e}", flush=True)
 
     def show_toaster(self, message):
         self.toaster = ToasterMessage(message, self)
+
+    def _on_terminal_log(self, text, color_type):
+        self.cyber_terminal.add_line(text, color_type)
 
     def attach_play_button_to_latest(self, callback):
         self.sig_attach_play.emit(callback)

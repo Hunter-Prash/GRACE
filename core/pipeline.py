@@ -333,16 +333,37 @@ async def pipeline_async(hud):
                 hud.set_state(STATE_PROCESSING)
 
                 try:
+                    # ── Terminal: Pipeline start ──
+                    hud.sig_terminal_log.emit("▶ INITIATING GEMINI API REQUEST...", "api")
+                    truncated = user_cmd[:80] + "..." if len(user_cmd) > 80 else user_cmd
+                    hud.sig_terminal_log.emit(f"  INPUT: \"{truncated}\"", "dim")
+
                     def make_api_call(text):
                         return requests.post(f"{API_STATE['url']}/api/chat", json={"text": text, "sessionId": "default"}, timeout=120).json()
 
                     response = await asyncio.to_thread(make_api_call, user_cmd)
 
                     if "error" in response:
+                        hud.sig_terminal_log.emit(f"✗ API ERROR: {response['error'][:60]}", "error")
                         raise Exception(response["error"])
 
                     tools_used = response.get("toolsUsed", [])
                     text_answer = response.get("text", "").strip()
+
+                    # ── Terminal: Response received ──
+                    req_in = response.get("inputTokens", 0)
+                    req_out = response.get("outputTokens", 0)
+                    hud.sig_terminal_log.emit(f"✓ GEMINI RESPONDED // {req_in + req_out} tokens", "api")
+
+                    # ── Terminal: DynamoDB metrics ──
+                    db_lat = response.get("dbLatencyMs", 0)
+                    db_items = response.get("dbContextItemsCount", 0)
+                    hud.sig_terminal_log.emit(f"▶ DYNAMODB READ // {db_lat}ms // {db_items} context items", "db")
+
+                    # ── Terminal: Tool calls ──
+                    for tool in tools_used:
+                        hud.sig_terminal_log.emit(f"▶ TOOL INVOKED: {tool}", "tool")
+
                     hud.add_message("GRACE", text_answer, tools=tools_used)
 
                     map_data = response.get("mapData")
@@ -354,6 +375,11 @@ async def pipeline_async(hud):
                     if search_data:
                         print(f"[DEBUG] Emitting sig_search_update with {len(search_data.get('results', []))} results and {len(search_data.get('images', []))} images")
                         hud.sig_search_update.emit(search_data)
+                        
+                    calendar_data = response.get("calendarData")
+                    if calendar_data:
+                        print(f"[DEBUG] Emitting sig_calendar_update with {len(calendar_data.get('events', []))} events")
+                        hud.sig_calendar_update.emit(calendar_data)
 
                     client_commands = response.get("clientCommands", [])
                     for cmd in client_commands:
@@ -409,8 +435,10 @@ async def pipeline_async(hud):
                     if response.get("indexerTriggered"):
                         msg = "🧠 MEMORY INDEXER TRIGGERED 🧠\nCompiling 40-message context to Pinecone."
                         hud.sig_alert_toaster.emit(msg)
+                        hud.sig_terminal_log.emit("▶ MEMORY INDEXER FIRED // COMPILING TO PINECONE", "rag")
 
                     hud.set_state(STATE_SPEAKING)
+                    hud.sig_terminal_log.emit("▶ SYNTHESIZING SPEECH VIA KOKORO TTS...", "tts")
 
                     from core.audio import stream_synthesize_and_play
                     interrupted, audio_bytes = await stream_synthesize_and_play(
@@ -428,6 +456,10 @@ async def pipeline_async(hud):
                         await asyncio.sleep(0.5)
                         with mic_queue.mutex:
                             mic_queue.queue.clear()
+
+                    # ── Terminal: Pipeline complete ──
+                    hud.sig_terminal_log.emit("✓ PIPELINE COMPLETE // RETURNING TO IDLE", "system")
+                    hud.sig_terminal_log.emit("─" * 52, "separator")
 
                     active_session = True
                     hud.set_state(STATE_LISTENING if interrupted else STATE_IDLE)

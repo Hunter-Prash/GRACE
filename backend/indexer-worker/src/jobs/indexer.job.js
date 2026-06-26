@@ -41,7 +41,7 @@ export const runMemoryIndexer = async (unindexedConversations) => {
 
     await logToDiscord(`[Indexer] Split payload into ${rawBatches.length} batch(es) to protect the 250k token context window.`);
 
-    // 3. Summarization with Gemini 2.5 Flash Lite
+    // 3. Summarization with Gemini 3.1 Flash Lite
     const allSummarizedFacts = [];
     const todayIST = getISTTimestamp().split('T')[0];
     const summarizationPrompt = `
@@ -67,7 +67,7 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
             while (retries > 0) {
                 try {
                     response = await ai.models.generateContent({
-                        model: 'gemini-3.5-flash-lite',
+                        model: 'gemini-3.1-flash-lite',
                         contents: `${summarizationPrompt}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
                     });
                     break;
@@ -87,6 +87,7 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
         } catch (err) {
             await logToDiscord(`[Indexer] Failed to summarize batch ${i + 1}: ${err.message}`);
             console.error(`[Indexer] Failed to summarize batch ${i + 1}:`, err.message);
+            throw err; // Throwing the error prevents the database from marking these as 'indexed' so it can retry later.this is called bubbling-up.. throw the error to the fucntion who called this fucntion
         }
     }
 

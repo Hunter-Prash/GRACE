@@ -3,6 +3,7 @@ import { processChat } from '../services/llm.service.js';
 import { saveChatMessage, loadChatHistory } from '../services/chat.service.js';
 import { triggerIndexerEvent } from '../services/eventbus.service.js';
 import { clearChatHistory, clearAllMemory, wipePinecone } from '../services/memory.service.js';
+import { getAuthUrl, handleAuthCallback } from '../services/calendar.service.js';
 
 const router = express.Router();
 
@@ -101,6 +102,29 @@ router.get('/trigger-indexer', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to trigger indexer' });
+    }
+});
+
+// ── Google Calendar Auth Routes ──
+
+router.get('/calendar/auth', (req, res) => {
+    const url = getAuthUrl();
+    if (!url) {
+        return res.status(500).json({ error: "Calendar integration not configured. Missing credentials.json" });
+    }
+    res.redirect(url);
+});
+
+router.post('/calendar/callback', async (req, res) => {
+    const { code } = req.body;
+    if (!code) {
+        return res.status(400).json({ error: "Authorization code is required" });
+    }
+    const success = await handleAuthCallback(code);
+    if (success) {
+        res.json({ success: true, message: "Calendar successfully authenticated!" });
+    } else {
+        res.status(500).json({ error: "Failed to authenticate with provided code" });
     }
 });
 

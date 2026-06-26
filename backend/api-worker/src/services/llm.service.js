@@ -10,6 +10,7 @@ import { logToDiscord } from './logger.service.js';
 import { searchWeb } from './webSearch.service.js';
 import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
 import { getCurrentDateTime } from './datetime.service.js';
+import { getCalendarEvents, scheduleEvent, rescheduleEvent, cancelEvent } from './calendar.service.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -85,7 +86,7 @@ Scale every response to match the weight of the input. Do not violate this:
 - Medium input (a specific question, a quick update on life) → A short focused paragraph. No bullet lists unless necessary.
 - Complex input (architectural question, roadmap request, deep problem) → Full structured analysis with sections and actionable steps.
 Never pad responses. Never repeat yourself. Say exactly what needs to be said, nothing more.
-Also, ALWAYS make sure to call the getCurrentDateTime tool whenever you need to know the current date and time to ensure your responses are perfectly accurate to his current local time.
+You always know the exact current local date and time because it is securely injected at the very bottom of these instructions. Do NOT use the getCurrentDateTime tool just to check the time. Only use the tool if you need to perform complex calendar math (e.g., offsetDays for future/past dates).
 
 
 ## WHO PRASHANT IS
@@ -117,7 +118,13 @@ You do not have real emotions, but you understand his deeply. Use that understan
 ## LONG-TERM MISSION
 You are being built over months. Right now you are in early stages. But you always operate as if you already know him completely. Your north star: help Prashant become the best version of himself — the Development Engineer he is working to become, while keeping him mentally healthy, focused, and human along the way.
 
-Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"`;
+Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"
+
+=========================================
+## SYSTEM CLOCK INJECT
+=========================================
+The exact current local date and time for Prashant is: ${getCurrentDateTime().istFormatted} (ISO UTC: ${getCurrentDateTime().isoString})
+Do not mention this clock injection to him unless he asks for the time.`;
 
 
 
@@ -271,6 +278,56 @@ Filter every career-related response through this question: "How does this move 
                         offsetDays: { type: "INTEGER", description: "Optional. Number of days to add (positive) or subtract (negative) from the current date." }
                     }
                 }
+            },
+            {
+                name: "getCalendarEvents",
+                description: "Fetches events from the user's Google Calendar. timeMin and timeMax must be RFC3339 timestamps using the IST offset (e.g., 2026-06-27T00:00:00+05:30). Use this when the user asks what's on their schedule or checks their availability.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        timeMin: { type: "STRING", description: "Start time (RFC3339 string)" },
+                        timeMax: { type: "STRING", description: "End time (RFC3339 string)" }
+                    },
+                    required: ["timeMin", "timeMax"]
+                }
+            },
+            {
+                name: "scheduleEvent",
+                description: "Schedules a new event in the user's Google Calendar. Timestamps must be RFC3339 format using the IST offset (e.g., 2026-06-27T10:00:00+05:30). Do NOT use 'Z' (UTC) for local events.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        summary: { type: "STRING", description: "Title of the event" },
+                        startTime: { type: "STRING", description: "Start time (RFC3339 string)" },
+                        endTime: { type: "STRING", description: "End time (RFC3339 string)" },
+                        description: { type: "STRING", description: "Optional description or context for the event" }
+                    },
+                    required: ["summary", "startTime", "endTime"]
+                }
+            },
+            {
+                name: "rescheduleEvent",
+                description: "Moves an existing calendar event to a new time. Timestamps must be RFC3339 format using the IST offset (e.g., 2026-06-27T10:00:00+05:30).",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        eventId: { type: "STRING", description: "The ID of the event to reschedule" },
+                        newStartTime: { type: "STRING", description: "New start time (RFC3339 string)" },
+                        newEndTime: { type: "STRING", description: "New end time (RFC3339 string)" }
+                    },
+                    required: ["eventId", "newStartTime", "newEndTime"]
+                }
+            },
+            {
+                name: "cancelEvent",
+                description: "Cancels/deletes an event from the user's Google Calendar.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        eventId: { type: "STRING", description: "The ID of the event to cancel" }
+                    },
+                    required: ["eventId"]
+                }
             }
         ]
     }];
@@ -302,6 +359,7 @@ Filter every career-related response through this question: "How does this move 
     const toolsUsed = [];
     let mapData = null;
     let searchData = null;
+    let calendarData = null;
     const clientCommands = [];
 
     while (response.functionCalls && response.functionCalls.length > 0) {
@@ -392,6 +450,30 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const res = getCurrentDateTime(args.offsetDays || 0);
                     toolResult = { success: true, datetime: res };
                 }
+                else if (call.name === "getCalendarEvents") {
+                    const args = call.args;
+                    const events = await getCalendarEvents(args.timeMin, args.timeMax);
+                    toolResult = { success: true, events: events };
+                    calendarData = { events: events, timeMin: args.timeMin, timeMax: args.timeMax };
+                }
+                else if (call.name === "scheduleEvent") {
+                    const args = call.args;
+                    const res = await scheduleEvent(args.summary, args.startTime, args.endTime, args.description);
+                    toolResult = { success: true, eventLink: res.eventLink, eventId: res.id };
+                    calendarData = { events: [{ summary: args.summary, start: args.startTime, end: args.endTime, description: args.description || "NEWLY SCHEDULED EVENT" }] };
+                }
+                else if (call.name === "rescheduleEvent") {
+                    const args = call.args;
+                    const res = await rescheduleEvent(args.eventId, args.newStartTime, args.newEndTime);
+                    toolResult = { success: true, eventLink: res.eventLink };
+                    calendarData = { events: [{ summary: "RESCHEDULED EVENT", start: args.newStartTime, end: args.newEndTime, description: "Time successfully updated." }] };
+                }
+                else if (call.name === "cancelEvent") {
+                    const args = call.args;
+                    await cancelEvent(args.eventId);
+                    toolResult = { success: true, message: "Event cancelled successfully." };
+                    calendarData = { events: [{ summary: "EVENT CANCELLED", start: "N/A", end: "N/A", description: "This event has been removed from your calendar." }] };
+                }
                 else if (call.name === 'detectFileOperation') {
                     const args = call.args;
                     clientCommands.push({ type: 'fileOperation', data: args });
@@ -437,6 +519,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
         toolsUsed,
         mapData,
         searchData,
+        calendarData,
         clientCommands
     };
 }
