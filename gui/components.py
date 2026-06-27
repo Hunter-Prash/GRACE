@@ -1601,10 +1601,21 @@ class HoloCard(QWidget):
         self.link.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_link(e, u=self.url):
             QDesktopServices.openUrl(QUrl(u))
+            
+            win = self.window()
+            if hasattr(win, '_card_widgets'):
+                for card in win._card_widgets:
+                    if card is not self:
+                        card.is_selected = False
+                        card.link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
+                        card.link.setText('[ ACCESS SECURE DATALINK ]')
+                        card.update()
+                        
             self.is_selected = True
             self.link.setStyleSheet(f"color: {GREEN}; border: none; background: transparent; font-weight: bold;")
-            self.link.setText(f'[ DATALINK ACCESSED ]')
+            self.link.setText('[ DATALINK ACCESSED ]')
             self.update()
+            
         self.link.mousePressEvent = _open_link
         lay.addWidget(self.link)
 
@@ -2825,18 +2836,21 @@ class ContextPanel(QWidget):
             self._revert_timer.timeout.connect(self.set_presence_mode)
         self._revert_timer.start(8000)
 
+
 # ──────────────────────────────────────────
-# HOLOGRAPHIC CALENDAR WINDOW (Dark Red Cyberpunk)
+# HOLOGRAPHIC CALENDAR WINDOW (Slim Cyberpunk)
 # ──────────────────────────────────────────
 
 class HoloCalendarWidget(QDialog):
-    WINDOW_W = 750
-    WINDOW_H = 650
+    WINDOW_W = 420
 
     def __init__(self, calendar_data, parent=None):
         super().__init__(parent)
         self.calendar_data = calendar_data
-        
+        self._drag_pos = None
+        self._scan_phase = 0.0
+        self._border_phase = 0.0
+
         self.setWindowFlags(
             Qt.WindowType.Dialog |
             Qt.WindowType.FramelessWindowHint |
@@ -2846,151 +2860,318 @@ class HoloCalendarWidget(QDialog):
 
         self.init_ui()
 
-        # ── Expansion Animation ──
+        # Calculate height dynamically based on event count (slim!)
+        event_count = len(calendar_data.get('events', []))
+        base_h = 120  # header + footer
+        per_event = 72
+        self.WINDOW_H = min(550, max(200, base_h + event_count * per_event))
+
+        # Position: right side of screen
         screen = QGuiApplication.primaryScreen().geometry()
         self._x_pos = screen.width() - self.WINDOW_W - 40
-        self._y_pos = max(20, screen.height() // 2 - self.WINDOW_H // 2)
+        self._y_pos = max(60, screen.height() // 2 - self.WINDOW_H // 2)
 
         self.setGeometry(self._x_pos, self._y_pos, 4, self.WINDOW_H)
         self.setWindowOpacity(0.0)
 
+        # ── Opening Animation ──
         self.anim_group = QSequentialAnimationGroup(self)
-        
+
         op = QPropertyAnimation(self, b"windowOpacity")
-        op.setDuration(120)
+        op.setDuration(150)
         op.setStartValue(0.0)
         op.setEndValue(1.0)
-        
+
         geom = QPropertyAnimation(self, b"geometry")
-        geom.setDuration(350)
-        geom.setStartValue(QRect(self._x_pos, self._y_pos, 4, self.WINDOW_H))
+        geom.setDuration(300)
+        geom.setStartValue(QRect(self._x_pos + self.WINDOW_W, self._y_pos, 4, self.WINDOW_H))
         geom.setEndValue(QRect(self._x_pos, self._y_pos, self.WINDOW_W, self.WINDOW_H))
         geom.setEasingCurve(QEasingCurve.Type.OutExpo)
-        
+
         self.anim_group.addAnimation(op)
         self.anim_group.addAnimation(geom)
+
+        # ── Animated scanline & border pulse ──
+        self._scan_timer = QTimer(self)
+        self._scan_timer.timeout.connect(self._tick_scan)
+        self._scan_timer.start(30)
+
+    def _tick_scan(self):
+        self._scan_phase += 0.008
+        if self._scan_phase > 1.3:
+            self._scan_phase = -0.3
+        self._border_phase += 0.03
+        self.update()
 
     def showEvent(self, event):
         super().showEvent(event)
         self.anim_group.start()
-        self.glitch_overlay.start_glitch(600)
-        QTimer.singleShot(550, self.populate_data)
+        self.glitch_overlay.start_glitch(500)
+        QTimer.singleShot(450, self.populate_data)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        if w < 10 or h < 10:
+            return
+
+        # ── Deep radial gradient background ──
+        radial = QRadialGradient(w * 0.5, h * 0.3, max(w, h) * 0.8)
+        radial.setColorAt(0.0, QColor(5, 15, 25, 240))
+        radial.setColorAt(0.4, QColor(2, 5, 10, 245))
+        radial.setColorAt(1.0, QColor(1, 2, 4, 250))
+        p.setBrush(QBrush(radial))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(0, 0, w, h, 6, 6)
+
+        # ── Subtle horizontal scanline sweep ──
+        scan_y = int(self._scan_phase * h)
+        scan_grad = QLinearGradient(0, scan_y - 30, 0, scan_y + 30)
+        scan_grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+        scan_grad.setColorAt(0.5, QColor(0, 212, 255, 18))
+        scan_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.fillRect(0, scan_y - 30, w, 60, scan_grad)
+        # Thin bright line at center
+        p.setPen(QPen(QColor(0, 212, 255, 35), 1))
+        p.drawLine(0, scan_y, w, scan_y)
+
+        # ── Glowing animated border ──
+        pulse = int(25 + 15 * math.sin(self._border_phase))
+        border_color = QColor(0, 212, 255, pulse)
+        p.setPen(QPen(border_color, 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(1, 1, w - 2, h - 2, 6, 6)
+
+        # ── Corner accents (bright blue tick marks) ──
+        accent = QColor(0, 212, 255, 150)
+        p.setPen(QPen(accent, 2))
+        corner_len = 18
+        # Top-left
+        p.drawLine(2, 2, 2 + corner_len, 2)
+        p.drawLine(2, 2, 2, 2 + corner_len)
+        # Top-right
+        p.drawLine(w - 2, 2, w - 2 - corner_len, 2)
+        p.drawLine(w - 2, 2, w - 2, 2 + corner_len)
+        # Bottom-left
+        p.drawLine(2, h - 2, 2 + corner_len, h - 2)
+        p.drawLine(2, h - 2, 2, h - 2 - corner_len)
+        # Bottom-right
+        p.drawLine(w - 2, h - 2, w - 2 - corner_len, h - 2)
+        p.drawLine(w - 2, h - 2, w - 2, h - 2 - corner_len)
 
     def init_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(0)
 
-        # Red Theme CyberBorderFrame
-        self.cyber_frame = CyberBorderFrame(self)
-        self.cyber_frame.setStyleSheet("background-color: #030101;")
-        # Override the draw tick in CyberBorderFrame for red? It's fine to just use the existing one, or we can make a RedCyberBorderFrame. 
-        # For simplicity, we just use the existing one, but we'll theme the interior heavily red.
-        root.addWidget(self.cyber_frame)
+        # ── Header ──
+        header = QHBoxLayout()
+        header.setSpacing(8)
 
-        outer_h = QHBoxLayout(self.cyber_frame)
-        outer_h.setContentsMargins(4, 4, 4, 4)
+        icon = QLabel("◈")
+        icon.setFont(mono(10, True))
+        icon.setFixedSize(20, 20)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet("color: #00D4FF; border: 1px solid rgba(0,212,255,0.6); border-radius: 10px; background: rgba(0,212,255,0.08);")
+        header.addWidget(icon)
 
-        self.bg_frame = QFrame()
-        self.bg_frame.setStyleSheet("background-color: #050202; border: 1px solid #400000;")
-        frame_layout = QVBoxLayout(self.bg_frame)
-        frame_layout.setContentsMargins(20, 16, 16, 16)
-        frame_layout.setSpacing(12)
+        title = QLabel("CHRONOS")
+        title.setFont(mono(10, True))
+        title.setStyleSheet("color: #00D4FF; letter-spacing: 3px; background: transparent; border: none;")
+        header.addWidget(title)
 
-        # Header
-        header_layout = QHBoxLayout()
-        icon = GlowLabel("◈", "#FF1133", 12, True)
-        icon.setFixedSize(22, 22)
-        icon.setStyleSheet("color: #FF1133; border: 1px solid #FF1133; border-radius: 11px;")
-        header_layout.addWidget(icon)
-        
-        title = GlowLabel("CHRONOS // SCHEDULE", "#FF1133", 11, True)
-        title.setStyleSheet("color: #FF1133; letter-spacing: 4px; font-weight: bold; border: none;")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
+        # Subtle status dot
+        dot = QLabel("●")
+        dot.setFont(mono(6))
+        dot.setStyleSheet("color: #00D4FF; background: transparent; border: none;")
+        header.addWidget(dot)
+
+        subtitle = QLabel("LIVE")
+        subtitle.setFont(mono(7, True))
+        subtitle.setStyleSheet("color: rgba(0,212,255,0.6); letter-spacing: 2px; background: transparent; border: none;")
+        header.addWidget(subtitle)
+
+        header.addStretch()
 
         btn_close = QPushButton("✕")
-        btn_close.setFixedSize(28, 28)
-        btn_close.setStyleSheet("QPushButton { color: #FF1133; background: transparent; border: 1px solid #FF1133; border-radius: 0px; font-size: 12px; font-weight: bold; } QPushButton:hover { background: rgba(255, 17, 51, 0.25); }")
+        btn_close.setFixedSize(24, 24)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton { color: #00D4FF; background: transparent; border: 1px solid rgba(0,212,255,0.3); font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: rgba(0,212,255,0.2); border: 1px solid #00D4FF; }
+        """)
         btn_close.clicked.connect(self.close_window)
-        header_layout.addWidget(btn_close)
-        frame_layout.addLayout(header_layout)
+        header.addWidget(btn_close)
 
+        root.addLayout(header)
+
+        # ── Divider ──
         div = QFrame()
         div.setFixedHeight(1)
-        div.setStyleSheet("background: rgba(255, 17, 51, 60);")
-        frame_layout.addWidget(div)
+        div.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 transparent, stop:0.3 rgba(0,212,255,80), stop:0.7 rgba(0,212,255,80), stop:1 transparent);")
+        root.addSpacing(6)
+        root.addWidget(div)
+        root.addSpacing(8)
 
-        # Main Scroll Area
+        # ── Scroll Area for events ──
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: transparent; width: 5px; } QScrollBar::handle:vertical { background: #FF1133; border-radius: 2px; }")
-        
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { background: transparent; width: 4px; }
+            QScrollBar::handle:vertical { background: rgba(0,212,255,0.4); border-radius: 2px; min-height: 20px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background: transparent;")
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setSpacing(10)
-        self.scroll_layout.setContentsMargins(0, 4, 4, 4)
-        
+        self.scroll_layout.setSpacing(6)
+        self.scroll_layout.setContentsMargins(0, 0, 4, 0)
+
         scroll.setWidget(self.scroll_content)
-        frame_layout.addWidget(scroll)
+        root.addWidget(scroll)
 
-        outer_h.addWidget(self.bg_frame)
-        
-        from PyQt6.QtWidgets import QSizeGrip
-        sg = QSizeGrip(self)
-        sg.setStyleSheet("background: transparent;")
-        outer_h.addWidget(sg, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+        # ── Footer ──
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 6, 0, 0)
+        f_lbl = QLabel("◇ GOOGLE CALENDAR API")
+        f_lbl.setFont(mono(7))
+        f_lbl.setStyleSheet("color: rgba(0,212,255,0.35); background: transparent; border: none; letter-spacing: 1px;")
+        footer.addWidget(f_lbl)
+        footer.addStretch()
 
-        # Overlays
+        from datetime import datetime
+        ts_lbl = QLabel(datetime.now().strftime("%H:%M:%S IST"))
+        ts_lbl.setFont(mono(7))
+        ts_lbl.setStyleSheet("color: rgba(0,212,255,0.35); background: transparent; border: none;")
+        footer.addWidget(ts_lbl)
+        root.addLayout(footer)
+
+        # ── Glitch overlay ──
         self.glitch_overlay = GlitchOverlay(self)
-        self.glitch_overlay.setGeometry(0, 0, self.WINDOW_W, self.WINDOW_H)
+        self.glitch_overlay.setGeometry(0, 0, self.WINDOW_W, 600)
         self.glitch_overlay.raise_()
 
     def populate_data(self):
         events = self.calendar_data.get('events', [])
         if not events:
-            lbl = QLabel("NO UPCOMING EVENTS IN THIS TIMEFRAME.")
-            lbl.setFont(mono(10))
-            lbl.setStyleSheet("color: rgba(255, 17, 51, 150);")
+            lbl = QLabel("NO EVENTS FOUND")
+            lbl.setFont(mono(9))
+            lbl.setStyleSheet("color: rgba(0,212,255,0.5); background: transparent; border: none;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.scroll_layout.addWidget(lbl)
         else:
             from datetime import datetime
-            for ev in events:
+            for i, ev in enumerate(events):
                 card = QFrame()
-                card.setStyleSheet("QFrame { background: rgba(30, 5, 5, 200); border-left: 3px solid #FF1133; border-bottom: 1px solid rgba(255, 17, 51, 40); }")
-                card_lay = QVBoxLayout(card)
-                
-                # Time parsing
+                card.setStyleSheet("""
+                    QFrame {
+                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                            stop:0 rgba(0,212,255,0.06), stop:1 rgba(0,212,255,0.02));
+                        border-left: 2px solid rgba(0,212,255,0.5);
+                        border-bottom: 1px solid rgba(0,212,255,0.08);
+                    }
+                """)
+                card_lay = QHBoxLayout(card)
+                card_lay.setContentsMargins(10, 8, 10, 8)
+                card_lay.setSpacing(10)
+
+                # ── Time badge ──
                 start_str = ev.get('start', '')
                 try:
                     dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-                    time_display = dt.strftime("%b %d, %I:%M %p")
-                except:
-                    time_display = start_str
+                    time_str = dt.strftime("%I:%M %p")
+                    date_str = dt.strftime("%b %d")
+                except Exception:
+                    time_str = "—"
+                    date_str = start_str[:10] if len(start_str) >= 10 else "—"
 
-                t_lbl = GlowLabel(f"{time_display} // {ev.get('summary', 'Untitled')}", "#FF3366", 10, True)
-                card_lay.addWidget(t_lbl)
-                
-                if ev.get('description'):
-                    d_lbl = QLabel(ev['description'][:150] + ("..." if len(ev['description']) > 150 else ""))
+                time_badge = QFrame()
+                time_badge.setFixedWidth(62)
+                time_badge.setStyleSheet("background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.2); border-radius: 3px;")
+                tb_lay = QVBoxLayout(time_badge)
+                tb_lay.setContentsMargins(4, 4, 4, 4)
+                tb_lay.setSpacing(0)
+
+                t1 = QLabel(time_str)
+                t1.setFont(mono(8, True))
+                t1.setStyleSheet("color: #00D4FF; background: transparent; border: none;")
+                t1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                tb_lay.addWidget(t1)
+
+                t2 = QLabel(date_str)
+                t2.setFont(mono(7))
+                t2.setStyleSheet("color: rgba(0,212,255,0.6); background: transparent; border: none;")
+                t2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                tb_lay.addWidget(t2)
+
+                card_lay.addWidget(time_badge)
+
+                # ── Event info ──
+                info_lay = QVBoxLayout()
+                info_lay.setSpacing(2)
+
+                summary = ev.get('summary', 'Untitled')
+                s_lbl = QLabel(summary)
+                s_lbl.setFont(mono(9, True))
+                s_lbl.setStyleSheet("color: #E0F7FA; background: transparent; border: none;")
+                s_lbl.setWordWrap(True)
+                info_lay.addWidget(s_lbl)
+
+                desc = ev.get('description', '')
+                if desc:
+                    d_lbl = QLabel(desc[:80] + ("…" if len(desc) > 80 else ""))
+                    d_lbl.setFont(sans(8))
+                    d_lbl.setStyleSheet("color: rgba(224,247,250,0.55); background: transparent; border: none;")
                     d_lbl.setWordWrap(True)
-                    d_lbl.setStyleSheet("color: rgba(255, 200, 200, 180); border: none;")
-                    d_lbl.setFont(sans(9))
-                    card_lay.addWidget(d_lbl)
-                
+                    info_lay.addWidget(d_lbl)
+
+                card_lay.addLayout(info_lay)
+
+                # ── Fade-in animation per card ──
+                opacity_fx = QGraphicsOpacityEffect(card)
+                card.setGraphicsEffect(opacity_fx)
+                opacity_fx.setOpacity(0.0)
+                anim = QPropertyAnimation(opacity_fx, b"opacity")
+                anim.setDuration(300)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+                QTimer.singleShot(i * 120, anim.start)
+                # prevent garbage collection
+                card._fade_anim = anim
+
                 self.scroll_layout.addWidget(card)
 
         self.scroll_layout.addStretch()
 
     def close_window(self):
-        self.glitch_overlay.start_glitch(400)
-        geom_anim = self.anim_group.animationAt(1)
-        geom_anim.setStartValue(QRect(self.x(), self.y(), 4, self.height()))
-        geom_anim.setEndValue(self.geometry())
-        self.anim_group.setDirection(QPropertyAnimation.Direction.Backward)
-        self.anim_group.finished.connect(self.accept)
-        self.anim_group.start()
+        self.glitch_overlay.start_glitch(350)
+        # Reverse slide animation
+        close_anim = QPropertyAnimation(self, b"geometry")
+        close_anim.setDuration(250)
+        close_anim.setStartValue(self.geometry())
+        close_anim.setEndValue(QRect(self.x() + self.WINDOW_W, self.y(), 4, self.height()))
+        close_anim.setEasingCurve(QEasingCurve.Type.InExpo)
+
+        fade = QPropertyAnimation(self, b"windowOpacity")
+        fade.setDuration(200)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
+
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(close_anim)
+        group.addAnimation(fade)
+        group.finished.connect(self.accept)
+        group.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'glitch_overlay'):
+            self.glitch_overlay.setGeometry(0, 0, self.width(), self.height())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

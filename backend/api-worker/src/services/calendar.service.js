@@ -1,4 +1,5 @@
-import { google } from 'googleapis';
+import { calendar } from '@googleapis/calendar';
+import { OAuth2Client } from 'google-auth-library';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +19,7 @@ export function getAuthUrl() {
     const { client_secret, client_id, redirect_uris } = credentials.installed;
 
     //create a temp authclient just for getting the auth url. We can't use the authClient defined above because it might already have a token. And generateAuthUrl expects an authClient without a token.
-    const authClientTemp = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+    const authClientTemp = new OAuth2Client(client_id, client_secret, redirect_uris[0]);
 
     return authClientTemp.generateAuthUrl({
         access_type: 'offline',
@@ -36,7 +37,7 @@ export async function handleAuthCallback(code) {
 
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
     const { client_secret, client_id, redirect_uris } = credentials.installed;
-    const client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+    const client = new OAuth2Client(client_id, client_secret, redirect_uris[0]);
 
     try {
         const { tokens } = await client.getToken(code);//exchange auth code for toekns
@@ -70,7 +71,7 @@ export async function initCalendarAuth() {
     const redirectUri = redirect_uris[0];
 
     //create the authClient object in memory 
-    authClient = new google.auth.OAuth2(client_id, client_secret, redirectUri);
+    authClient = new OAuth2Client(client_id, client_secret, redirectUri);
 
     //Check if token.json exists (this is your personal access/refresh token from a previous login). If yes, load it into the client via setCredentials and you're done — Grace can hit Calendar right away.
     //If no token.json, return null — meaning "not authenticated yet, go run the OAuth flow."
@@ -94,10 +95,10 @@ export async function getCalendarEvents(timeMin, timeMax) {
     if (!authClient) await initCalendarAuth();
     if (!authClient) throw new Error("Calendar not authenticated. Please run the setup flow.");
 
-    const calendar = google.calendar({ version: 'v3', auth: authClient });
+    const cal = calendar({ version: 'v3', auth: authClient });
 
     try {
-        const res = await calendar.events.list({
+        const res = await cal.events.list({
             calendarId: 'primary',
             timeMin: timeMin,
             timeMax: timeMax,
@@ -120,21 +121,25 @@ export async function getCalendarEvents(timeMin, timeMax) {
     }
 }
 
-export async function scheduleEvent(summary, startTime, endTime, description = "") {
+export async function scheduleEvent(summary, startTime, endTime, description = "", recurrence = null) {
     if (!authClient) await initCalendarAuth();
     if (!authClient) throw new Error("Calendar not authenticated.");
 
-    const calendar = google.calendar({ version: 'v3', auth: authClient });
+    const cal = calendar({ version: 'v3', auth: authClient });
 
     const event = {
         summary: summary,
         description: description,
-        start: { dateTime: startTime },
-        end: { dateTime: endTime }
+        start: { dateTime: startTime, timeZone: 'Asia/Kolkata' },
+        end: { dateTime: endTime, timeZone: 'Asia/Kolkata' }
     };
 
+    if (recurrence && Array.isArray(recurrence)) {
+        event.recurrence = recurrence;
+    }
+
     try {
-        const res = await calendar.events.insert({
+        const res = await cal.events.insert({
             calendarId: 'primary',
             resource: event,
         });
@@ -149,19 +154,19 @@ export async function rescheduleEvent(eventId, newStartTime, newEndTime) {
     if (!authClient) await initCalendarAuth();
     if (!authClient) throw new Error("Calendar not authenticated.");
 
-    const calendar = google.calendar({ version: 'v3', auth: authClient });
+    const cal = calendar({ version: 'v3', auth: authClient });
 
     try {
         // First get the existing event to keep other details
-        const event = await calendar.events.get({
+        const event = await cal.events.get({
             calendarId: 'primary',
             eventId: eventId
         });
 
-        event.data.start.dateTime = newStartTime;
-        event.data.end.dateTime = newEndTime;
+        event.data.start = { dateTime: newStartTime, timeZone: 'Asia/Kolkata' };
+        event.data.end = { dateTime: newEndTime, timeZone: 'Asia/Kolkata' };
 
-        const res = await calendar.events.update({
+        const res = await cal.events.update({
             calendarId: 'primary',
             eventId: eventId,
             resource: event.data,
@@ -177,10 +182,10 @@ export async function cancelEvent(eventId) {
     if (!authClient) await initCalendarAuth();
     if (!authClient) throw new Error("Calendar not authenticated.");
 
-    const calendar = google.calendar({ version: 'v3', auth: authClient });
+    const cal = calendar({ version: 'v3', auth: authClient });
 
     try {
-        await calendar.events.delete({
+        await cal.events.delete({
             calendarId: 'primary',
             eventId: eventId
         });

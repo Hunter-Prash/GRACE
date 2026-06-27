@@ -120,6 +120,9 @@ You are being built over months. Right now you are in early stages. But you alwa
 
 Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"
 
+## TOOL USAGE (CRITICAL)
+Whenever asked to perform any hard facts lookup, database query, calendar lookup, or search, you MUST ALWAYS use the LLM tools at your disposal. Do NOT blindly answer using short-term context or generic knowledge. Ensure accuracy by actively retrieving data via tools.
+
 =========================================
 ## SYSTEM CLOCK INJECT
 =========================================
@@ -293,21 +296,22 @@ Do not mention this clock injection to him unless he asks for the time.`;
             },
             {
                 name: "scheduleEvent",
-                description: "Schedules a new event in the user's Google Calendar. Timestamps must be RFC3339 format using the IST offset (e.g., 2026-06-27T10:00:00+05:30). Do NOT use 'Z' (UTC) for local events.",
+                description: "Schedules a new event in the user's Google Calendar. Timestamps must be RFC3339 format. Provide the EXACT local time requested and simply append +05:30. DO NOT subtract 5.5 hours. Example: 4:00 PM IST must be exactly T16:00:00+05:30.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
                         summary: { type: "STRING", description: "Title of the event" },
                         startTime: { type: "STRING", description: "Start time (RFC3339 string)" },
                         endTime: { type: "STRING", description: "End time (RFC3339 string)" },
-                        description: { type: "STRING", description: "Optional description or context for the event" }
+                        description: { type: "STRING", description: "Optional description or context for the event" },
+                        recurrence: { type: "ARRAY", items: { type: "STRING" }, description: "Optional recurrence rule, e.g., ['RRULE:FREQ=YEARLY']" }
                     },
                     required: ["summary", "startTime", "endTime"]
                 }
             },
             {
                 name: "rescheduleEvent",
-                description: "Moves an existing calendar event to a new time. Timestamps must be RFC3339 format using the IST offset (e.g., 2026-06-27T10:00:00+05:30).",
+                description: "Moves an existing calendar event to a new time. Timestamps must be RFC3339 format. Provide the EXACT local time requested and simply append +05:30. DO NOT subtract 5.5 hours.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
@@ -458,7 +462,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 }
                 else if (call.name === "scheduleEvent") {
                     const args = call.args;
-                    const res = await scheduleEvent(args.summary, args.startTime, args.endTime, args.description);
+                    const res = await scheduleEvent(args.summary, args.startTime, args.endTime, args.description, args.recurrence);
                     toolResult = { success: true, eventLink: res.eventLink, eventId: res.id };
                     calendarData = { events: [{ summary: args.summary, start: args.startTime, end: args.endTime, description: args.description || "NEWLY SCHEDULED EVENT" }] };
                 }

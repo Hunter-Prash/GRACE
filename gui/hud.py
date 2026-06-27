@@ -845,8 +845,8 @@ class GraceHUD(QMainWindow):
     def _show_search_hologram(self, search_data):
         try:
             print(f"[DEBUG] _show_search_hologram TRIGGERED! Data keys: {list(search_data.keys())}", flush=True)
-            hw = HoloSearchWindow(search_data)
-            hw.exec()
+            self._holo_search_window = HoloSearchWindow(search_data)
+            self._holo_search_window.show()
             print("[DEBUG] HoloSearchWindow instantiated and show() called successfully.", flush=True)
         except Exception as e:
             print(f"[ERROR] failed to show HoloSearchWindow: {e}", flush=True)
@@ -855,10 +855,14 @@ class GraceHUD(QMainWindow):
 
     def _show_calendar_hologram(self, calendar_data):
         try:
-            cw = HoloCalendarWidget(calendar_data)
-            cw.exec()
+            print(f"[DEBUG] _show_calendar_hologram TRIGGERED! Data: {calendar_data}", flush=True)
+            self._holo_calendar_window = HoloCalendarWidget(calendar_data)
+            self._holo_calendar_window.show()
+            print("[DEBUG] HoloCalendarWidget opened successfully.", flush=True)
         except Exception as e:
             print(f"[ERROR] failed to show HoloCalendarWidget: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     def show_toaster(self, message):
         self.toaster = ToasterMessage(message, self)

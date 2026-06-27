@@ -84,6 +84,7 @@ router.post('/chat', async (req, res) => {
             indexerTriggered: indexerTriggered,
             mapData: result.mapData,
             searchData: result.searchData,
+            calendarData: result.calendarData,
             clientCommands: result.clientCommands
         });
 
