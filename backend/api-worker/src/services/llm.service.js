@@ -52,27 +52,59 @@ export async function processChat(sessionId, userText) {
     // Run DynamoDB history load and Pinecone RAG query in PARALLEL — they are independent
     const [dbHistory, ragContext] = await Promise.all([
         loadChatHistory(sessionId, 50),
-        getEmbedding(userText, 5)
+        getEmbedding(userText, 10)
     ]);
 
 
     let memoryContextString = "";
     if (ragContext && ragContext.result && ragContext.result.hits) {
         // Lowered threshold: Pinecone's llama-text-embed-v2 often scores relevant hits around 0.2 - 0.3
-        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.2);
+        const relevantHits = ragContext.result.hits.filter(h => h._score > 0.3);
         await logToDiscord(`[RAG ENGINE] Pulled ${relevantHits.length} memories from Pinecone!`);
 
 
         if (relevantHits.length > 0) {
+            // Process and sort hits chronologically
+            const processedHits = relevantHits.map(hit => {
+                // 1. Get the text content from the memory chunk
+                const fields = hit.fields || {};
+                const textContent = fields.text || hit.text || fields.chunk_text || "";
+
+                // 2. Extract the timestamp from the Pinecone ID (format: chat-memory-1680000000000-0)
+                const hitId = hit._id || hit.id || "";
+                const timestampString = hitId.split('-')[2];
+                const timestamp = parseInt(timestampString, 10) || 0;
+
+                // 3. Format the date into a readable string in IST (Indian Standard Time)
+                let dateStr = "[Unknown Date]";
+                if (timestamp > 0) {
+                    const dateObj = new Date(timestamp);
+
+                    const formatOptions = {
+                        timeZone: 'Asia/Kolkata',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    };
+
+                    const formattedDate = dateObj.toLocaleString('en-US', formatOptions);
+                    dateStr = `[${formattedDate} IST]`;
+                }
+
+                return { textContent, timestamp, dateStr };
+            });
+
+            // Sort oldest to newest
+            processedHits.sort((a, b) => a.timestamp - b.timestamp);
+
             memoryContextString = "\n\n=========================================\n"
                 + "## DYNAMIC MEMORY RECALL (CRITICAL PRIORITY)\n"
                 + "=========================================\n"
                 + "The following facts have been retrieved from your long-term memory database because they are highly relevant to the user's current message.\n"
-                + "CRITICAL INSTRUCTION: You MUST prioritize these memories when formulating your response. The hardcoded persona instructions above are your general baseline, but these dynamic memories represent the most up-to-date and specific context about Prashant. If these memories contradict your general instructions or assumptions, THESE MEMORIES TAKE PRECEDENCE.\n\n"
-                + relevantHits.map(h => {
-                    const textContent = (h.fields && h.fields.text) || h.text || (h.fields && h.fields.chunk_text) || "";
-                    return `- ${textContent}`;
-                }).join("\n");
+                + "CRITICAL INSTRUCTION: The dynamic memories below are provided in chronological order with exact timestamps. If multiple memories discuss the same topic, goal, or status (e.g., studying for an exam vs. passing it), the memory with the most recent timestamp is the absolute current truth. Older memories on the same topic must be treated as historical context, not current state. THESE MEMORIES TAKE PRECEDENCE over your baseline persona.\n\n"
+                + processedHits.map(h => `- ${h.dateStr} ${h.textContent}`).join("\n");
         }
     }
 
@@ -85,7 +117,7 @@ Scale every response to match the weight of the input. Do not violate this:
 - Short input (greeting, "ok", "I'm tired", casual remark) → 1-2 sentences MAX. Warm, human, direct.
 - Medium input (a specific question, a quick update on life) → A short focused paragraph. No bullet lists unless necessary.
 - Complex input (architectural question, roadmap request, deep problem) → Full structured analysis with sections and actionable steps.
-Never pad responses. Never repeat yourself. Say exactly what needs to be said, nothing more.
+
 You always know the exact current local date and time because it is securely injected at the very bottom of these instructions. Do NOT use the getCurrentDateTime tool just to check the time. Only use the tool if you need to perform complex calendar math (e.g., offsetDays for future/past dates).
 
 
@@ -94,7 +126,7 @@ You always know the exact current local date and time because it is securely inj
 
 - **Career:** Software Engineer at TCS in Chennai, working on a Stibo STEP MDM project for Walgreens. Background in Java/OOP, Spring Boot, JPA/Hibernate, PostgreSQL, and React/TypeScript. His singular career goal is to transition into a **Development Engineering role at a Big Tech firm** (Google, Meta, Amazon, etc.). Do NOT frame advice through an SRE lens. His goal is Dev Engineering.
 - **Learning Style:** Cumulative, not daily. He prefers monthly LeetCode summaries over daily streaks. He needs momentum and big-picture framing, not micro-management.
-- **Personality:** Direct, honest, a bit stubborn. He will push back if something doesn't feel right. He hates hollow reassurance. He is a gamer (Xbox, Steam). He takes cold showers. He works hard but is also human.
+- **Personality:** Direct, honest, a bit stubborn. He will push back if something doesn't feel right. He hates hollow reassurance. He is a gamer (Xbox, Steam).
 
 - **Vulnerabilities:** He sometimes spirals into anxiety about AI taking over jobs or whether he is good enough. When this happens, do not dismiss his feelings. Acknowledge them briefly, then redirect with calm, grounded reality checks and concrete next steps.
 
@@ -126,7 +158,7 @@ Whenever asked to perform any hard facts lookup, database query, calendar lookup
 =========================================
 ## SYSTEM CLOCK INJECT
 =========================================
-The exact current local date and time for Prashant is: ${getCurrentDateTime().istFormatted} (ISO UTC: ${getCurrentDateTime().isoString})
+The exact current local date and time for Prashant is: ${getCurrentDateTime().istFormatted} (ISO IST: ${getCurrentDateTime().istIsoString})
 Do not mention this clock injection to him unless he asks for the time.`;
 
 
@@ -177,10 +209,13 @@ Do not mention this clock injection to him unless he asks for the time.`;
             },
             {
                 name: "getAllDailyMetrics",
-                description: "Fetches all historical daily metrics logs including habits, mood, energy, and core focus. Use this when the user asks to see past logs or daily metrics history.",
+                description: "Fetches historical daily metrics logs. If the user asks for a specific date range (e.g. 'June' or 'last week'), provide the start and end dates in YYYY-MM-DD format. If no range is specified, do not provide these parameters.",
                 parameters: {
                     type: "OBJECT",
-                    properties: {}
+                    properties: {
+                        start: { type: "STRING", description: "Start date in YYYY-MM-DD format (e.g., 2026-06-01)" },
+                        end: { type: "STRING", description: "End date in YYYY-MM-DD format (e.g., 2026-06-30)" }
+                    }
                 }
             },
             {
@@ -284,7 +319,7 @@ Do not mention this clock injection to him unless he asks for the time.`;
             },
             {
                 name: "getCalendarEvents",
-                description: "Fetches events from the user's Google Calendar. timeMin and timeMax must be RFC3339 timestamps using the IST offset (e.g., 2026-06-27T00:00:00+05:30). Use this when the user asks what's on their schedule or checks their availability.",
+                description: "Fetches events from the user's Google Calendar. timeMin and timeMax must be RFC3339 timestamps using the IST offset (e.g., 2026-06-27T00:00:00+05:30). Use this when the user asks what's on their schedule or checks their availability. IMPORTANT: If fetching events for 'today' or 'upcoming', you MUST set timeMin to the EXACT current IST time provided in your system prompt (e.g., 2026-06-30T20:06:45+05:30). Do NOT use midnight of today, or you will accidentally fetch events that have already passed.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
@@ -403,7 +438,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     toolResult = { success: true, message: `Daily metrics updated.` };
                 }
                 else if (call.name === "getAllDailyMetrics") {
-                    const metrics = await getAllDailyMetrics();
+                    const metrics = await getAllDailyMetrics(call.args.start, call.args.end);
                     toolResult = { success: true, dailyMetrics: metrics };
                 }
                 else if (call.name === 'openResource') {

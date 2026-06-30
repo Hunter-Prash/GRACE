@@ -12,7 +12,7 @@ from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
     sig_state   = pyqtSignal(str)
-    sig_message = pyqtSignal(str, str, list)
+    sig_message = pyqtSignal(str, str, list, bool)
     sig_wave    = pyqtSignal(list)
     sig_attach_play = pyqtSignal(object)
     sig_metrics     = pyqtSignal(int, float)
@@ -28,6 +28,7 @@ class GraceHUD(QMainWindow):
     sig_clear_context = pyqtSignal()
     sig_map_update  = pyqtSignal(dict)
     sig_search_update = pyqtSignal(dict)
+    sig_finish_history = pyqtSignal()
     sig_show_briefing_panel = pyqtSignal(dict)
     sig_env_toggle = pyqtSignal(str)
     sig_context_scene = pyqtSignal(dict)
@@ -545,6 +546,7 @@ class GraceHUD(QMainWindow):
         self.sig_wave.connect(self.context_panel.update_audio)
         self.sig_map_update.connect(self.map_pane.process_map_data)
         self.sig_search_update.connect(self._show_search_hologram)
+        self.sig_finish_history.connect(self.finish_history_load)
         self.sig_calendar_update.connect(self._show_calendar_hologram)
         self.map_pane.sig_data_ready.connect(lambda: self.map_tab.set_glow(True))
         self.sig_db_latency.connect(lambda lat: self.metric_db_latency.set_value(f"{lat}ms"))
@@ -735,7 +737,7 @@ class GraceHUD(QMainWindow):
             self.metric_dy_rcu.set_value(f"{dy.get('rcu', 0):.1f}")
             self.metric_dy_wcu.set_value(f"{dy.get('wcu', 0):.1f}")
 
-    def _on_message(self, speaker: str, text: str, tools: list):
+    def _on_message(self, speaker: str, text: str, tools: list, animate: bool = True):
         if self.latest_bubble:
             try:
                 self.latest_bubble.remove_play_button()
@@ -748,7 +750,7 @@ class GraceHUD(QMainWindow):
             badge_html = f"<br><br><span style='color: gray; font-size: 10px;'><i>🛠️ Tools: {tools_str}</i></span>"
             text += badge_html
 
-        bubble = ChatBubble(speaker, text)
+        bubble = ChatBubble(speaker, text, animate=animate)
         
         # Row container to handle left/right bubble alignments
         row = QWidget()
@@ -809,8 +811,8 @@ class GraceHUD(QMainWindow):
     def set_state(self, state: str):
         self.sig_state.emit(state)
 
-    def add_message(self, speaker: str, text: str, tools: list = None):
-        self.sig_message.emit(speaker, text, tools or [])
+    def add_message(self, speaker: str, text: str, tools: list = None, animate: bool = True):
+        self.sig_message.emit(speaker, text, tools or [], animate)
 
     def set_waveform(self, bars: list):
         self.sig_wave.emit(bars)
@@ -845,7 +847,15 @@ class GraceHUD(QMainWindow):
     def _show_search_hologram(self, search_data):
         try:
             print(f"[DEBUG] _show_search_hologram TRIGGERED! Data keys: {list(search_data.keys())}", flush=True)
-            self._holo_search_window = HoloSearchWindow(search_data)
+            
+            # Clean up old search window if it exists
+            if hasattr(self, '_holo_search_window') and self._holo_search_window is not None:
+                try:
+                    self._holo_search_window.deleteLater()
+                except RuntimeError:
+                    pass
+
+            self._holo_search_window = HoloSearchWindow(search_data, parent=self)
             self._holo_search_window.show()
             print("[DEBUG] HoloSearchWindow instantiated and show() called successfully.", flush=True)
         except Exception as e:

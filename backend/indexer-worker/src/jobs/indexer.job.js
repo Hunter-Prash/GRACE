@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { upsertQuery, getEmbedding } from "../services/rag.service.js";
+import { upsertQuery, getEmbedding, deleteRecord } from "../services/rag.service.js";
 import { getISTTimestamp } from "../services/db.client.js";
 import { sendIndexerNotification } from "../services/sns.service.js";
 import { logToDiscord } from "../services/logger.service.js";
@@ -116,23 +116,61 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
         const pineconeRes = await getEmbedding(doc.pageContent, 1);
 
         let isDuplicate = false;
+        let finalChunkText = doc.pageContent;
+
         if (pineconeRes && pineconeRes.result && pineconeRes.result.hits && pineconeRes.result.hits.length > 0) {
-            // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.35 threshold to drop semantically near-identical duplicates.
-            const score = pineconeRes.result.hits[0]._score || pineconeRes.result.hits[0]._score;
+            const hit = pineconeRes.result.hits[0];
+            const score = hit._score || hit.score;
+            
             if (score > 0.45) {
-                isDuplicate = true;
-                duplicatesDropped++;
-                console.log(`[Indexer] Chunk ${idx + 1} is a duplicate (score: ${score.toFixed(3)}). Dropping.`);
+                // Extract timestamp of the matching vector to see how old it is
+                const oldId = hit._id || hit.id || "";
+                const idParts = oldId.split('-');
+                let hoursSinceOld = 999;
+                
+                if (idParts.length >= 3 && !isNaN(idParts[2])) {
+                    const oldTimestamp = parseInt(idParts[2], 10);
+                    hoursSinceOld = (Date.now() - oldTimestamp) / (1000 * 60 * 60);
+                }
+                
+                if (score > 0.85) {
+                    // Almost identical verbatim string -> Always drop
+                    isDuplicate = true;
+                    duplicatesDropped++;
+                    console.log(`[Indexer] Chunk ${idx + 1} is an exact duplicate (score: ${score.toFixed(3)}). Dropping.`);
+                } else if (score > 0.45 && hoursSinceOld < 24) {
+                    // Very similar and happened recently -> likely conversation overlap, drop it
+                    isDuplicate = true;
+                    duplicatesDropped++;
+                    console.log(`[Indexer] Chunk ${idx + 1} is a recent duplicate (score: ${score.toFixed(3)}, age: ${hoursSinceOld.toFixed(1)}h). Dropping.`);
+                } else {
+                    // It's similar, but it's an OLD memory (>24h). This is likely a STATE UPDATE! Keep it.
+                    isDuplicate = false;
+                    const oldText = hit.fields?.text || hit.text || hit.fields?.chunk_text || "";
+                    
+                    // Code-based compaction: merge strings and delete old vector
+                    finalChunkText = oldText + "\n[Update]: " + doc.pageContent;
+                    
+                    // Safety valve: prevent exceeding embedding model token limits
+                    if (finalChunkText.length > 25000) {
+                        finalChunkText = finalChunkText.slice(-25000);
+                        console.log(`[Indexer] Chunk ${idx + 1} string exceeded 25000 chars. Truncated to preserve newest state.`);
+                    }
+
+                    console.log(`[Indexer] Chunk ${idx + 1} matches an old memory (score: ${score.toFixed(3)}, age: ${hoursSinceOld.toFixed(1)}h). Compacting via code and deleting old vector ${oldId}.`);
+                    
+                    await deleteRecord(oldId);
+                }
             }
         }
 
         if (!isDuplicate) {
             newPineconeRecords.push({
                 _id: `chat-memory-${Date.now()}-${idx}`,
-                text: doc.pageContent,
+                text: finalChunkText,
                 category: "chat_history"
             });
-            console.log(`[Indexer] Chunk ${idx + 1} is NEW. Queuing for upsert.`);
+            console.log(`[Indexer] Chunk ${idx + 1} is NEW/COMPACTED. Queuing for upsert.`);
         }
 
         // Small sleep to respect Pinecone embedding API limits if many chunks

@@ -251,8 +251,8 @@ async def pipeline_async(hud):
                                     text = msg["parts"][0].get("text", "")
                                 else:
                                     text = msg.get("text", "")
-                                hud.add_message(role, text)
-                            hud._loading_history = False
+                                hud.add_message(role, text, animate=False)
+                            hud.sig_finish_history.emit()
                     except Exception as e:
                         hud.add_message("GRACE", f"Failed to fetch history: {e}")
                     continue

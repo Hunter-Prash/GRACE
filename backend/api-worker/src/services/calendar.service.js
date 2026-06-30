@@ -3,6 +3,7 @@ import { OAuth2Client } from 'google-auth-library';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getCurrentDateTime } from './datetime.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,6 +95,13 @@ export async function initCalendarAuth() {
 export async function getCalendarEvents(timeMin, timeMax) {
     if (!authClient) await initCalendarAuth();
     if (!authClient) throw new Error("Calendar not authenticated. Please run the setup flow.");
+
+    // Clip timeMin to the current time to strictly prevent fetching past events
+    const now = new Date();
+    const requestedTimeMin = new Date(timeMin);
+    if (requestedTimeMin < now) {
+        timeMin = getCurrentDateTime().istIsoString;
+    }
 
     const cal = calendar({ version: 'v3', auth: authClient });
 

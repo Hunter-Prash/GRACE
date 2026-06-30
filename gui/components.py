@@ -490,7 +490,7 @@ class StatusRing(QWidget):
 # CHAT BUBBLE
 # ──────────────────────────────────────────
 class ChatBubble(QFrame):
-    def __init__(self, speaker, text, parent=None):
+    def __init__(self, speaker, text, animate=True, parent=None):
         super().__init__(parent)
         self.is_user = speaker == "YOU"
         
@@ -544,19 +544,20 @@ class ChatBubble(QFrame):
             self.scan_timer.start(40)
             
         # --- FADE IN ANIMATION ---
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_anim.setDuration(400)
-        self.fade_anim.setStartValue(0.0)
-        self.fade_anim.setEndValue(1.0)
-        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self.fade_anim.start()
+        if animate:
+            self.opacity_effect = QGraphicsOpacityEffect(self)
+            self.setGraphicsEffect(self.opacity_effect)
+            self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+            self.fade_anim.setDuration(400)
+            self.fade_anim.setStartValue(0.0)
+            self.fade_anim.setEndValue(1.0)
+            self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+            self.fade_anim.start()
         
         # --- TYPING EFFECT ---
         self.full_text = text
         self.lbl_txt = lbl_txt
-        if not self.is_user:
+        if not self.is_user and animate:
             self.lbl_txt.setText("")
             self.type_idx = 0
             self.type_timer = QTimer(self)
@@ -1902,7 +1903,7 @@ class TelemetrySidePane(QFrame):
         bars = "█" * random.randint(2, 8) + "░" * random.randint(1, 4)
         self._progress_lbl.setText(f"{bars} {random.randint(40, 99)}%")
 
-class HoloSearchWindow(QDialog):
+class HoloSearchWindow(QWidget):
     WINDOW_W = 820
     WINDOW_H = 750
 
@@ -1912,12 +1913,6 @@ class HoloSearchWindow(QDialog):
         self._drag_pos = None
         self._card_widgets = []
 
-        # Frameless, translucent, always-on-top
-        self.setWindowFlags(
-            Qt.WindowType.Dialog |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.network_manager = QNetworkAccessManager(self)
@@ -1925,41 +1920,30 @@ class HoloSearchWindow(QDialog):
         self.init_ui()
         self.populate_data()
 
-        # ── Left-Side Expanding Animation ──────────────────
-        screen = QGuiApplication.primaryScreen().geometry()
-        self._x_pos = 30
-        self._y_pos = max(20, screen.height() // 2 - self.WINDOW_H // 2)
+        parent_w = parent.width() if parent else 1920
+        parent_h = parent.height() if parent else 1080
+        
+        self._y_pos = max(20, parent_h // 2 - self.WINDOW_H // 2)
+        self._x_hidden = parent_w
+        self._x_visible = parent_w - self.WINDOW_W - 30
 
-        self.setGeometry(self._x_pos, self._y_pos, 4, self.WINDOW_H)
-        self.setWindowOpacity(0.0)
-
-        self.anim_group = QSequentialAnimationGroup(self)
-
-        # Step 1: Flash in as a thin vertical sliver
-        op = QPropertyAnimation(self, b"windowOpacity")
-        op.setDuration(120)
-        op.setStartValue(0.0)
-        op.setEndValue(1.0)
-
-        # Step 2: Expand horizontally from left
-        geom = QPropertyAnimation(self, b"geometry")
-        geom.setDuration(350)
-        geom.setStartValue(QRect(self._x_pos, self._y_pos, 4, self.WINDOW_H))
-        geom.setEndValue(QRect(self._x_pos, self._y_pos, self.WINDOW_W, self.WINDOW_H))
-        geom.setEasingCurve(QEasingCurve.Type.OutExpo)
-
-        self.anim_group.addAnimation(op)
-        self.anim_group.addAnimation(geom)
+        self.setGeometry(self._x_hidden, self._y_pos, self.WINDOW_W, self.WINDOW_H)
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.anim_group.start()
+        
+        self.anim = QPropertyAnimation(self, b"pos")
+        self.anim.setDuration(400)
+        self.anim.setStartValue(QPoint(self._x_hidden, self._y_pos))
+        self.anim.setEndValue(QPoint(self._x_visible, self._y_pos))
+        self.anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        self.anim.start()
 
         # Trigger glitch during opening
         self.glitch_overlay.start_glitch(600)
 
         # Sequential card pop-in after expansion finishes
-        QTimer.singleShot(550, self._animate_cards_in)
+        QTimer.singleShot(450, self._animate_cards_in)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2267,14 +2251,14 @@ class HoloSearchWindow(QDialog):
     def close_window(self):
         self.glitch_overlay.start_glitch(400)
         
-        # Update animation to close from CURRENT size/position if resized
-        geom_anim = self.anim_group.animationAt(1)
-        geom_anim.setStartValue(QRect(self.x(), self.y(), 4, self.height()))
-        geom_anim.setEndValue(self.geometry())
-
-        self.anim_group.setDirection(QPropertyAnimation.Direction.Backward)
-        self.anim_group.finished.connect(self.accept)
-        self.anim_group.start()
+        # Slide out to the right
+        self.out_anim = QPropertyAnimation(self, b"pos")
+        self.out_anim.setDuration(350)
+        self.out_anim.setStartValue(self.pos())
+        self.out_anim.setEndValue(QPoint(self._x_hidden, self.y()))
+        self.out_anim.setEasingCurve(QEasingCurve.Type.InExpo)
+        self.out_anim.finished.connect(self.deleteLater)
+        self.out_anim.start()
 
     # Make frameless window draggable
     def mousePressEvent(self, event):

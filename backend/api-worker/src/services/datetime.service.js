@@ -26,9 +26,21 @@ export function getCurrentDateTime(offsetDays = 0) {
             formattedString += p.value;
         });
 
+        // Generate an exact ISO string with +05:30 offset
+        const pad = (n) => n < 10 ? '0' + n : n;
+        const istDateObj = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+        const istIsoString = istDateObj.getUTCFullYear() +
+            '-' + pad(istDateObj.getUTCMonth() + 1) +
+            '-' + pad(istDateObj.getUTCDate()) +
+            'T' + pad(istDateObj.getUTCHours()) +
+            ':' + pad(istDateObj.getUTCMinutes()) +
+            ':' + pad(istDateObj.getUTCSeconds()) +
+            '+05:30';
+
         return {
             status: "success",
-            isoString: date.toISOString(),
+            isoString: date.toISOString(), // Raw UTC ISO
+            istIsoString: istIsoString, // Formatted IST ISO
             istFormatted: formattedString,
             offsetDaysApplied: offsetDays
         };
