@@ -73,12 +73,17 @@ async def pipeline_async(hud):
     from core.audio import oww_model
 
     audio = pyaudio.PyAudio()
-    mic_stream = audio.open(
-        format=pyaudio.paInt16, channels=1, rate=16000,
-        input=True, frames_per_buffer=CHUNK_SIZE, stream_callback=mic_callback)
-    spk_stream = audio.open(
-        format=pyaudio.paInt16, channels=1, rate=24000,
-        output=True, frames_per_buffer=CHUNK_SIZE, stream_callback=speaker_callback)
+    try:
+        mic_stream = audio.open(
+            format=pyaudio.paInt16, channels=1, rate=16000,
+            input=True, frames_per_buffer=CHUNK_SIZE, stream_callback=mic_callback)
+        spk_stream = audio.open(
+            format=pyaudio.paInt16, channels=1, rate=24000,
+            output=True, frames_per_buffer=CHUNK_SIZE, stream_callback=speaker_callback)
+    except Exception as e:
+        print(f"Warning: Audio device missing. Voice disabled. ({e})")
+        mic_stream = None
+        spk_stream = None
 
     # Initial boot text, wait for Node.js API to provide history if needed later
     hud.add_message("GRACE", "Booting system... Connecting to Core Backend.")
@@ -477,10 +482,12 @@ async def pipeline_async(hud):
     except Exception:
         pass
     finally:
-        mic_stream.stop_stream()
-        mic_stream.close()
-        spk_stream.stop_stream()
-        spk_stream.close()
+        if mic_stream:
+            mic_stream.stop_stream()
+            mic_stream.close()
+        if spk_stream:
+            spk_stream.stop_stream()
+            spk_stream.close()
         audio.terminate()
 
 def run_pipeline(hud):
