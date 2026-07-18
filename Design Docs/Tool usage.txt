@@ -1,0 +1,29 @@
+CALENDER USAGE
+
+Read/Fetch Events (getCalendarEvents)
+
+What it does: Pulls your schedule for any time period.
+How to use it: "What does my schedule look like today?" or "Am I free next Tuesday afternoon?"
+Schedule New Events (scheduleEvent)
+
+What it does: Blocks time on your calendar for a new event. It supports descriptions and even recurring rules!
+How to use it: "Block 2 hours for a deep dive on AWS tomorrow at 10 AM" or "Schedule a recurring team sync every Friday at 4 PM."
+Reschedule Events (rescheduleEvent)
+
+What it does: Moves an existing event to a new time block.
+How to use it: "Move my AWS deep dive to tomorrow at 2 PM instead."
+Cancel Events (cancelEvent)
+
+What it does: Completely deletes an event from your calendar.
+How to use it: "Cancel that team sync for this Friday."
+
+
+EXPENSE USAGE
+Log a New Expense (addTransaction)
+
+What it does: Records a new transaction into your DynamoDB table. It automatically extracts the cost, maps it to one of your strict categories, and grabs the exact time.
+How to use it: "I just spent 500 on food at a cafe" or "Log 2000 for my AWS hosting this month" or "Add an expense of 800 for a movie ticket."
+Check Your Spending (getTransactions)
+
+What it does: Pulls all your transaction data between any two dates so Grace can analyze it, give you totals, or break it down by category.
+How to use it: "How much have I spent so far this month?", "What were my total expenses last week?", or "Give me a breakdown of all my travel expenses in June."

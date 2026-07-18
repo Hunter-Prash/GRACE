@@ -54,6 +54,8 @@ Resources:
             TableName: GraceGoals
         - DynamoDBCrudPolicy:
             TableName: GraceMetrics
+        - DynamoDBCrudPolicy:
+            TableName: Expense-Tracker-Transactions-Table
         - EventBridgePutEventsPolicy:
             EventBusName: grace-ai-bus
       Events:

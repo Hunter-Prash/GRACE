@@ -98,3 +98,13 @@ export const clearPineconeMemory = async () => {
         throw e;
     }
 }
+
+// Delete a single record by ID
+export const deleteRecord = async (id) => {
+    try {
+        await index.deleteOne(id);
+        console.log(`[Pinecone] Deleted obsolete vector: ${id}`);
+    } catch (e) {
+        console.error(`Error deleting Pinecone record ${id}:`, e);
+    }
+}

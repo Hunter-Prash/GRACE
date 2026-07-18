@@ -2,7 +2,7 @@ import os
 import math
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QConicalGradient, QRadialGradient, QLinearGradient, QPixmap, QGuiApplication, QPainterPath, QPolygon, QPolygonF, QBrush, QDesktopServices
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PyQt6.QtCore import QUrl, pyqtSignal, Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve, QRectF, QRect, QPoint, QPointF
+from PyQt6.QtCore import QUrl, pyqtSignal, Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, QSequentialAnimationGroup, QVariantAnimation, QEasingCurve, QRectF, QRect, QPoint, QPointF
 from PyQt6.QtWidgets import QLabel, QFrame, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QDialog, QScrollArea, QGraphicsDropShadowEffect
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -490,7 +490,7 @@ class StatusRing(QWidget):
 # CHAT BUBBLE
 # ──────────────────────────────────────────
 class ChatBubble(QFrame):
-    def __init__(self, speaker, text, parent=None):
+    def __init__(self, speaker, text, animate=True, parent=None):
         super().__init__(parent)
         self.is_user = speaker == "YOU"
         
@@ -544,19 +544,20 @@ class ChatBubble(QFrame):
             self.scan_timer.start(40)
             
         # --- FADE IN ANIMATION ---
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_anim.setDuration(400)
-        self.fade_anim.setStartValue(0.0)
-        self.fade_anim.setEndValue(1.0)
-        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self.fade_anim.start()
+        if animate:
+            self.opacity_effect = QGraphicsOpacityEffect(self)
+            self.setGraphicsEffect(self.opacity_effect)
+            self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+            self.fade_anim.setDuration(400)
+            self.fade_anim.setStartValue(0.0)
+            self.fade_anim.setEndValue(1.0)
+            self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+            self.fade_anim.start()
         
         # --- TYPING EFFECT ---
         self.full_text = text
         self.lbl_txt = lbl_txt
-        if not self.is_user:
+        if not self.is_user and animate:
             self.lbl_txt.setText("")
             self.type_idx = 0
             self.type_timer = QTimer(self)
@@ -1567,6 +1568,7 @@ class HoloCard(QWidget):
         super().__init__(parent)
         self.is_new = is_new
         self.url = url
+        self.is_selected = False
         
         # Setup layout
         lay = QVBoxLayout(self)
@@ -1594,14 +1596,29 @@ class HoloCard(QWidget):
         lay.addWidget(c_lbl)
         
         # Link
-        link = QLabel(f'[ ACCESS SECURE DATALINK ]')
-        link.setFont(mono(8))
-        link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
-        link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link = QLabel(f'[ ACCESS SECURE DATALINK ]')
+        self.link.setFont(mono(8))
+        self.link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
+        self.link.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_link(e, u=self.url):
             QDesktopServices.openUrl(QUrl(u))
-        link.mousePressEvent = _open_link
-        lay.addWidget(link)
+            
+            win = self.window()
+            if hasattr(win, '_card_widgets'):
+                for card in win._card_widgets:
+                    if card is not self:
+                        card.is_selected = False
+                        card.link.setStyleSheet(f"color: {PINK}; border: none; background: transparent; font-weight: bold;")
+                        card.link.setText('[ ACCESS SECURE DATALINK ]')
+                        card.update()
+                        
+            self.is_selected = True
+            self.link.setStyleSheet(f"color: {GREEN}; border: none; background: transparent; font-weight: bold;")
+            self.link.setText('[ DATALINK ACCESSED ]')
+            self.update()
+            
+        self.link.mousePressEvent = _open_link
+        lay.addWidget(self.link)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1619,13 +1636,20 @@ class HoloCard(QWidget):
         path.closeSubpath()
         
         # Background pure black/dark
-        painter.fillPath(path, QColor(8, 8, 12, 240))
+        if self.is_selected:
+            painter.fillPath(path, QColor(0, 255, 0, 15))
+        else:
+            painter.fillPath(path, QColor(8, 8, 12, 240))
         
         # Border gradient
         pen_grad = QLinearGradient(0, 0, w, h)
-        pen_grad.setColorAt(0, parse_color(PINK))
-        pen_grad.setColorAt(0.35, parse_color(CYAN))
-        pen_grad.setColorAt(1, parse_color(CYAN))
+        if self.is_selected:
+            pen_grad.setColorAt(0, parse_color(GREEN))
+            pen_grad.setColorAt(1, parse_color(GREEN))
+        else:
+            pen_grad.setColorAt(0, parse_color(PINK))
+            pen_grad.setColorAt(0.35, parse_color(CYAN))
+            pen_grad.setColorAt(1, parse_color(CYAN))
         
         pen = QPen(pen_grad, 2)
         painter.setPen(pen)
@@ -1648,83 +1672,320 @@ class HoloCard(QWidget):
             painter.drawText(QRect(w - 36, 4, 32, 16), Qt.AlignmentFlag.AlignCenter, "NEW")
 
 # ──────────────────────────────────────────
-# HOLOGRAPHIC SEARCH WINDOW (Jarvis Style)
+# HOLOGRAPHIC SEARCH WINDOW (Cyberpunk HUD)
 # ──────────────────────────────────────────
-class HoloSearchWindow(QDialog):
+import random
+
+class CyberBorderFrame(QFrame):
+    """A frame that draws animated cyberpunk corner brackets and pulsing neon border."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._phase = 0.0
+        self._bracket_len = 20
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(30)
+
+    def _tick(self):
+        self._phase += 0.04
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        bl = self._bracket_len
+
+        # Pulsing border alpha
+        pulse = int(80 + 40 * math.sin(self._phase * 2))
+        border_color = QColor(255, 60, 120, pulse)
+        pen = QPen(border_color, 1.5)
+        p.setPen(pen)
+        p.drawRect(1, 1, w - 2, h - 2)
+
+        # Corner brackets — bright cyan
+        bracket_alpha = int(200 + 55 * math.sin(self._phase * 3))
+        bp = QPen(QColor(0, 212, 255, bracket_alpha), 2)
+        p.setPen(bp)
+
+        # Top-left
+        p.drawLine(0, 0, bl, 0)
+        p.drawLine(0, 0, 0, bl)
+        # Top-right
+        p.drawLine(w, 0, w - bl, 0)
+        p.drawLine(w - 1, 0, w - 1, bl)
+        # Bottom-left
+        p.drawLine(0, h - 1, bl, h - 1)
+        p.drawLine(0, h - 1, 0, h - 1 - bl)
+        # Bottom-right
+        p.drawLine(w - 1, h - 1, w - 1 - bl, h - 1)
+        p.drawLine(w - 1, h - 1, w - 1, h - 1 - bl)
+
+        # Animated data-stream line at the top
+        stream_x = int((math.sin(self._phase) + 1) / 2 * w)
+        p.setPen(QPen(QColor(0, 212, 255, 100), 1))
+        p.drawLine(0, 0, stream_x, 0)
+
+        p.end()
+
+
+class GlitchOverlay(QWidget):
+    """Chromatic aberration + horizontal tearing glitch during open/close."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.is_glitching = False
+        self._intensity = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(33)  # ~30fps
+
+    def start_glitch(self, duration_ms=600):
+        self.is_glitching = True
+        self._intensity = 8
+        QTimer.singleShot(duration_ms, self._stop)
+
+    def _stop(self):
+        self.is_glitching = False
+        self.update()
+
+    def _tick(self):
+        if self.is_glitching:
+            self._intensity = random.randint(4, 12)
+            self.update()
+
+    def paintEvent(self, e):
+        if not self.is_glitching:
+            return
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        intensity = self._intensity
+
+        # Horizontal tear slices
+        for _ in range(random.randint(3, 8)):
+            y = random.randint(0, h)
+            bh = random.randint(1, 6)
+            shift = random.randint(-intensity, intensity)
+            # Cyan channel shift
+            p.fillRect(shift, y, w, bh, QColor(0, 255, 255, 35))
+            # Pink/red channel shift (opposite direction)
+            p.fillRect(-shift, y + random.randint(-2, 2), w, bh, QColor(255, 0, 80, 30))
+
+        # Random block displacement
+        for _ in range(random.randint(1, 3)):
+            bx = random.randint(0, w - 80)
+            by = random.randint(0, h - 20)
+            bw = random.randint(40, 120)
+            bbh = random.randint(5, 15)
+            p.fillRect(bx + random.randint(-6, 6), by, bw, bbh, QColor(0, 212, 255, 20))
+
+        p.end()
+
+
+class ScanlineOverlay(QWidget):
+    """CRT scanline that sweeps down with a gradient bloom trail."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._y = 0.0
+        self.anim = QVariantAnimation(self)
+        self.anim.setDuration(3000)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.setLoopCount(-1)
+        self.anim.valueChanged.connect(self._update_y)
+        self.anim.start()
+
+    def _update_y(self, val):
+        self._y = val
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        y = int(self._y * h)
+
+        # Gradient bloom trail above the scanline
+        trail_h = 60
+        grad = QLinearGradient(0, max(0, y - trail_h), 0, y)
+        grad.setColorAt(0, QColor(0, 212, 255, 0))
+        grad.setColorAt(1, QColor(0, 212, 255, 8))
+        p.fillRect(0, max(0, y - trail_h), w, trail_h, grad)
+
+        # Main bright scanline
+        p.fillRect(0, y, w, 1, QColor(0, 212, 255, 70))
+        # Subtle secondary line
+        p.fillRect(0, y + 2, w, 1, QColor(0, 212, 255, 15))
+
+        # Faint static noise lines (every ~4 pixels)
+        p.setPen(QPen(QColor(0, 212, 255, 4), 1))
+        for sy in range(0, h, 4):
+            p.drawLine(0, sy, w, sy)
+
+        p.end()
+
+
+class TelemetrySidePane(QFrame):
+    """Rapidly updating hex/memory readout panel on the right side."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(150)
+        self.setStyleSheet(
+            f"background: #020304;"
+            f"border: 1px solid rgba(0, 212, 255, 60);"
+            f"border-left: 1px solid rgba(255, 60, 120, 80);"
+        )
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(10, 14, 10, 14)
+        self.lay.setSpacing(4)
+
+        # Header
+        header = GlowLabel("◈ SYS_TELEMETRY", PINK, 8, True)
+        header.setStyleSheet(
+            f"color: {PINK}; border: none; border-bottom: 1px solid rgba(255,60,120,80); padding-bottom: 6px;"
+        )
+        self.lay.addWidget(header)
+
+        self.lay.addSpacing(4)
+
+        # Status indicators
+        self._status_lbl = GlowLabel("● LINK ACTIVE", CYAN, 7, True)
+        self._status_lbl.setStyleSheet(f"color: {CYAN}; border: none;")
+        self.lay.addWidget(self._status_lbl)
+
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background: rgba(0, 212, 255, 30);")
+        self.lay.addWidget(div)
+
+        self.lay.addSpacing(2)
+
+        # Data labels
+        self.labels = []
+        for _ in range(18):
+            l = GlowLabel("0x0000", CYAN_MID, 7, True)
+            l.setStyleSheet(f"color: {CYAN_MID}; border: none; padding: 1px 0px;")
+            l.setFixedHeight(14)
+            self.lay.addWidget(l)
+            self.labels.append(l)
+
+        self.lay.addStretch()
+
+        # Footer with "progress"
+        self._progress_lbl = GlowLabel("DECRYPTING...", PINK, 7, True)
+        self._progress_lbl.setStyleSheet(f"color: {PINK}; border: none;")
+        self.lay.addWidget(self._progress_lbl)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._scramble)
+        self.timer.start(60)
+        self._tick_count = 0
+
+    def _scramble(self):
+        self._tick_count += 1
+        prefixes = ["MEM_", "NET_", "0x", "REG:", "I/O:", "PTR_", "BUF_"]
+        suffixes = ["OK", "--", ">>", "<<", "██"]
+        for lbl in self.labels:
+            if random.random() > 0.6:
+                prefix = random.choice(prefixes)
+                val = f"{random.randint(0, 0xFFFF):04X}"
+                suffix = random.choice(suffixes) if random.random() > 0.7 else ""
+                lbl.setText(f"{prefix}{val} {suffix}")
+
+        # Cycle status
+        if self._tick_count % 30 == 0:
+            statuses = ["● LINK ACTIVE", "● SCANNING...", "● SYNC OK", "● PACKET IN"]
+            self._status_lbl.setText(random.choice(statuses))
+
+        # Progress bar effect
+        bars = "█" * random.randint(2, 8) + "░" * random.randint(1, 4)
+        self._progress_lbl.setText(f"{bars} {random.randint(40, 99)}%")
+
+class HoloSearchWindow(QWidget):
+    WINDOW_W = 820
+    WINDOW_H = 750
+
     def __init__(self, search_data, parent=None):
         super().__init__(parent)
         self.search_data = search_data
         self._drag_pos = None
         self._card_widgets = []
-        
-        # Frameless, translucent, always-on-top
-        self.setWindowFlags(
-            Qt.WindowType.Dialog |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
+
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(640, 720)
-        
+
         self.network_manager = QNetworkAccessManager(self)
-        
+
         self.init_ui()
         self.populate_data()
+
+        parent_w = parent.width() if parent else 1920
+        parent_h = parent.height() if parent else 1080
         
-        # ── Slide-up + Fade-in Animation ──────────────────
-        screen = QGuiApplication.primaryScreen().geometry()
-        self._x_pos = screen.width() // 2 - 320
-        self._end_y  = max(0, screen.height() // 2 - 360)
-        self._start_y = self._end_y + 120
-        
-        self.setGeometry(self._x_pos, self._start_y, 640, 720)
-        self.setWindowOpacity(0.0)
-        
-        self.anim_group = QParallelAnimationGroup(self)
-        
-        op = QPropertyAnimation(self, b"windowOpacity")
-        op.setDuration(550)
-        op.setStartValue(0.0)
-        op.setEndValue(1.0)
-        op.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-        pos = QPropertyAnimation(self, b"pos")
-        pos.setDuration(750)
-        pos.setStartValue(QPoint(self._x_pos, self._start_y))
-        pos.setEndValue(QPoint(self._x_pos, self._end_y))
-        pos.setEasingCurve(QEasingCurve.Type.OutBack)
-        
-        self.anim_group.addAnimation(op)
-        self.anim_group.addAnimation(pos)
+        self._y_pos = max(20, parent_h // 2 - self.WINDOW_H // 2)
+        self._x_hidden = parent_w
+        self._x_visible = parent_w - self.WINDOW_W - 30
+
+        self.setGeometry(self._x_hidden, self._y_pos, self.WINDOW_W, self.WINDOW_H)
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.anim_group.start()
-        # ── Sequential card pop-in ─────────────────────────
-        QTimer.singleShot(500, self._animate_cards_in)
+        
+        self.anim = QPropertyAnimation(self, b"pos")
+        self.anim.setDuration(400)
+        self.anim.setStartValue(QPoint(self._x_hidden, self._y_pos))
+        self.anim.setEndValue(QPoint(self._x_visible, self._y_pos))
+        self.anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        self.anim.start()
+
+        # Trigger glitch during opening
+        self.glitch_overlay.start_glitch(600)
+
+        # Sequential card pop-in after expansion finishes
+        QTimer.singleShot(450, self._animate_cards_in)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Keep overlays matching window size
+        if hasattr(self, 'scanline'):
+            self.scanline.setGeometry(0, 0, self.width(), self.height())
+        if hasattr(self, 'glitch_overlay'):
+            self.glitch_overlay.setGeometry(0, 0, self.width(), self.height())
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        
+        # Root layout — no margins, the CyberBorderFrame IS the visual boundary
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        # The main bordered frame with animated corner brackets
+        self.cyber_frame = CyberBorderFrame(self)
+        self.cyber_frame.setStyleSheet("background-color: #020305;")
+        root.addWidget(self.cyber_frame)
+
+        # Inside the cyber frame: HBox for [Main Content | Telemetry]
+        outer_h = QHBoxLayout(self.cyber_frame)
+        outer_h.setContentsMargins(2, 2, 2, 2)
+        outer_h.setSpacing(0)
+
+        # ═══════ LEFT: Main Search Panel ═══════
         self.bg_frame = QFrame()
         self.bg_frame.setStyleSheet(
-            f"background-color: #030406;"
-            f"border: 1px solid rgba(255, 60, 120, 100);"
-            f"border-radius: 0px;"
+            "background-color: #030406;"
+            "border: none;"
         )
-        
+
         frame_layout = QVBoxLayout(self.bg_frame)
-        frame_layout.setContentsMargins(18, 14, 18, 18)
-        frame_layout.setSpacing(10)
-        
+        frame_layout.setContentsMargins(20, 16, 16, 16)
+        frame_layout.setSpacing(8)
+
         # ── Header bar ────────────────────────────────────
         header_layout = QHBoxLayout()
         header_layout.setSpacing(8)
-        
+
         # Title Area
         t_lay = QHBoxLayout()
-        t_lay.setContentsMargins(10, 4, 10, 4)
+        t_lay.setContentsMargins(0, 0, 0, 0)
         icon = GlowLabel("◈", CYAN, 12, True)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setFixedSize(22, 22)
@@ -1734,21 +1995,21 @@ class HoloSearchWindow(QDialog):
         title.setStyleSheet(f"color: {PINK}; letter-spacing: 4px; font-weight: bold; border: none;")
         t_lay.addWidget(title)
         header_layout.addLayout(t_lay)
-        
+
         header_layout.addStretch()
-        
+
         # Signal Area
         s_lay = QHBoxLayout()
-        s_lay.setContentsMargins(10, 4, 10, 4)
+        s_lay.setContentsMargins(0, 0, 0, 0)
         dot = PulsingDot(CYAN, 7)
         s_lay.addWidget(dot)
         signal = GlowLabel("SIGNAL: STRONG", CYAN, 9, True)
         signal.setStyleSheet(f"color: {CYAN}; border: none;")
         s_lay.addWidget(signal)
         header_layout.addLayout(s_lay)
-        
-        header_layout.addSpacing(16)
-        
+
+        header_layout.addSpacing(12)
+
         btn_close = QPushButton("✕")
         btn_close.setFixedSize(28, 28)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1766,20 +2027,28 @@ class HoloSearchWindow(QDialog):
         btn_close.clicked.connect(self.close_window)
         header_layout.addWidget(btn_close)
         frame_layout.addLayout(header_layout)
-        
-        frame_layout.addSpacing(4)
-        
-        # ── Query label (Box) ───────────────────────────────────
+
+        # ── Divider line ──
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet("background: rgba(0, 212, 255, 40);")
+        frame_layout.addWidget(div)
+
+        # ── Query label (Box) ──────────────────────────────
         query = self.search_data.get('query', '')
         q_frame = QFrame()
-        q_frame.setStyleSheet(f"border: 1px solid {CYAN_DIM}; border-radius: 0px; background: transparent;")
+        q_frame.setStyleSheet(f"border: 1px solid rgba(0, 212, 255, 40); border-radius: 0px; background: rgba(0, 212, 255, 8);")
         q_lay = QHBoxLayout(q_frame)
         q_lay.setContentsMargins(12, 6, 12, 6)
-        q_lbl = GlowLabel(f"QUERY > {query.lower()}", CYAN, 9, True)
+        q_prefix = GlowLabel("QUERY >", PINK, 9, True)
+        q_prefix.setStyleSheet(f"color: {PINK}; border: none;")
+        q_prefix.setFixedWidth(60)
+        q_lay.addWidget(q_prefix)
+        q_lbl = GlowLabel(f"{query.lower()}", CYAN, 9, True)
         q_lbl.setStyleSheet(f"color: {CYAN}; border: none;")
         q_lay.addWidget(q_lbl)
         frame_layout.addWidget(q_frame)
-        
+
         # ── Main Scroll Area ──────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -1792,12 +2061,12 @@ class HoloSearchWindow(QDialog):
             }}
             QScrollBar:vertical {{
                 background: rgba(0, 0, 0, 0);
-                width: 6px;
-                border-radius: 3px;
+                width: 5px;
+                border-radius: 2px;
             }}
             QScrollBar::handle:vertical {{
                 background: {CYAN};
-                border-radius: 3px;
+                border-radius: 2px;
                 min-height: 20px;
             }}
             QScrollBar::add-line:vertical,
@@ -1805,37 +2074,58 @@ class HoloSearchWindow(QDialog):
                 height: 0px;
             }}
         """)
-        
+
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background: transparent;")
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setSpacing(12)
+        self.scroll_layout.setSpacing(10)
         self.scroll_layout.setContentsMargins(0, 4, 4, 4)
-        
+
         scroll.setWidget(self.scroll_content)
         frame_layout.addWidget(scroll)
-        
+
         # ── Footer Stats ──────────────────────────────────
+        footer_div = QFrame()
+        footer_div.setFixedHeight(1)
+        footer_div.setStyleSheet("background: rgba(0, 212, 255, 25);")
+        frame_layout.addWidget(footer_div)
+
         footer_layout = QHBoxLayout()
-        footer_layout.setContentsMargins(4, 8, 4, 0)
+        footer_layout.setContentsMargins(4, 6, 4, 0)
         res_count = len(self.search_data.get('results', []))
         self.lbl_results = GlowLabel(f"RESULTS:  {res_count}", CYAN_DIM, 8, True)
-        
-        import random
+
         lat = random.randint(180, 420)
         self.lbl_latency = GlowLabel(f"LATENCY:  {lat}ms", CYAN_DIM, 8, True)
-        
+
         self.lbl_uplink = GlowLabel("UPLINK:  ENCRYPTED", CYAN_DIM, 8, True)
-        
+
         footer_layout.addWidget(self.lbl_results)
         footer_layout.addStretch()
         footer_layout.addWidget(self.lbl_latency)
         footer_layout.addStretch()
         footer_layout.addWidget(self.lbl_uplink)
-        
+
         frame_layout.addLayout(footer_layout)
-        
-        main_layout.addWidget(self.bg_frame)
+
+        outer_h.addWidget(self.bg_frame, 1)  # stretches to fill
+
+        # ═══════ RIGHT: Telemetry Side Pane ═══════
+        self.telemetry_pane = TelemetrySidePane()
+        outer_h.addWidget(self.telemetry_pane, 0)  # fixed width, no stretch
+
+        from PyQt6.QtWidgets import QSizeGrip
+        self.size_grip = QSizeGrip(self)
+        self.size_grip.setStyleSheet("background: transparent;")
+        self.telemetry_pane.lay.addWidget(self.size_grip, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+
+        # ═══════ Overlays (on top of everything) ═══════
+        self.scanline = ScanlineOverlay(self)
+        self.scanline.setGeometry(0, 0, self.WINDOW_W, self.WINDOW_H)
+        self.glitch_overlay = GlitchOverlay(self)
+        self.glitch_overlay.setGeometry(0, 0, self.WINDOW_W, self.WINDOW_H)
+        self.scanline.raise_()
+        self.glitch_overlay.raise_()
 
     @staticmethod
     def _clean_text(text):
@@ -1919,10 +2209,6 @@ class HoloSearchWindow(QDialog):
         for i, card in enumerate(self._card_widgets):
             QTimer.singleShot(i * 120, card.show)
 
-    def _animate_cards_in(self):
-        for i, card in enumerate(self._card_widgets):
-            QTimer.singleShot(i * 120, card.show)
-
     # ── DRAGGING LOGIC ──
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1963,9 +2249,16 @@ class HoloSearchWindow(QDialog):
         reply.deleteLater()
         
     def close_window(self):
-        self.anim_group.setDirection(QPropertyAnimation.Direction.Backward)
-        self.anim_group.finished.connect(self.accept)
-        self.anim_group.start()
+        self.glitch_overlay.start_glitch(400)
+        
+        # Slide out to the right
+        self.out_anim = QPropertyAnimation(self, b"pos")
+        self.out_anim.setDuration(350)
+        self.out_anim.setStartValue(self.pos())
+        self.out_anim.setEndValue(QPoint(self._x_hidden, self.y()))
+        self.out_anim.setEasingCurve(QEasingCurve.Type.InExpo)
+        self.out_anim.finished.connect(self.deleteLater)
+        self.out_anim.start()
 
     # Make frameless window draggable
     def mousePressEvent(self, event):
@@ -1980,6 +2273,196 @@ class HoloSearchWindow(QDialog):
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+
+# ──────────────────────────────────────────
+# CYBERPUNK PIPELINE TERMINAL (Aesthetic System Monitor)
+# ──────────────────────────────────────────
+class CyberTerminalLine(QWidget):
+    """A single line in the terminal with typewriter animation."""
+    def __init__(self, text, color_type="dim", parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(18)
+        self._full_text = text
+        self._visible_chars = 0
+        self._color_type = color_type
+
+        self.label = QLabel(self)
+        self.label.setFont(mono(8))
+        self.label.setStyleSheet(f"color: {self._get_color()}; background: transparent; border: none; padding: 0px 4px;")
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.label)
+
+        # Typewriter timer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._type_next)
+        self._timer.start(12)  # ~12ms per character
+
+    def _get_color(self):
+        colors = {
+            "api": AMBER,
+            "tool": PINK,
+            "db": GREEN,
+            "rag": CYAN,
+            "tts": "#B388FF",
+            "dim": CYAN_DIM,
+            "system": CYAN,
+            "error": "#FF5252",
+            "separator": "rgba(0, 212, 255, 30)",
+        }
+        return colors.get(self._color_type, CYAN_DIM)
+
+    def _type_next(self):
+        self._visible_chars += 2  # 2 chars at a time for speed
+        if self._visible_chars >= len(self._full_text):
+            self._visible_chars = len(self._full_text)
+            self._timer.stop()
+        self.label.setText(self._full_text[:self._visible_chars])
+
+
+class CyberTerminal(QWidget):
+    """Aesthetic pipeline terminal that visualizes Grace's backend operations."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        # Outer border frame with cyberpunk styling
+        self.frame = CyberBorderFrame(self)
+        self.frame.setStyleSheet("background-color: #020305;")
+        root.addWidget(self.frame)
+
+        frame_lay = QVBoxLayout(self.frame)
+        frame_lay.setContentsMargins(12, 14, 12, 12)
+        frame_lay.setSpacing(6)
+
+        # Header
+        header = QHBoxLayout()
+        header.setSpacing(6)
+        icon = GlowLabel("▣", CYAN, 10, True)
+        icon.setStyleSheet(f"color: {CYAN}; border: none;")
+        header.addWidget(icon)
+        title = GlowLabel("PIPELINE TERMINAL", PINK, 10, True)
+        title.setStyleSheet(f"color: {PINK}; letter-spacing: 3px; font-weight: bold; border: none;")
+        header.addWidget(title)
+        header.addStretch()
+
+        self._status_dot = PulsingDot(GREEN, 6)
+        header.addWidget(self._status_dot)
+        self._status_lbl = GlowLabel("STANDBY", CYAN_DIM, 8, True)
+        self._status_lbl.setStyleSheet(f"color: {CYAN_DIM}; border: none;")
+        header.addWidget(self._status_lbl)
+
+        frame_lay.addLayout(header)
+
+        # Divider
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet("background: rgba(0, 212, 255, 40);")
+        frame_lay.addWidget(div)
+
+        # Scrollable terminal area
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: rgba(0, 0, 0, 0);
+                width: 4px;
+                border-radius: 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {CYAN};
+                border-radius: 2px;
+                min-height: 15px;
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+
+        self.terminal_content = QWidget()
+        self.terminal_content.setStyleSheet("background: transparent;")
+        self.terminal_layout = QVBoxLayout(self.terminal_content)
+        self.terminal_layout.setContentsMargins(4, 4, 4, 4)
+        self.terminal_layout.setSpacing(2)
+        self.terminal_layout.addStretch()
+
+        self.scroll.setWidget(self.terminal_content)
+        frame_lay.addWidget(self.scroll)
+
+        # Footer with animated data-flow bar
+        footer = QHBoxLayout()
+        footer.setContentsMargins(4, 4, 4, 0)
+        self._footer_lbl = GlowLabel("AWAITING PIPELINE EVENT...", CYAN_DIM, 7, True)
+        self._footer_lbl.setStyleSheet(f"color: {CYAN_DIM}; border: none;")
+        footer.addWidget(self._footer_lbl)
+        footer.addStretch()
+        self._line_count_lbl = GlowLabel("LINES: 0", CYAN_DIM, 7, True)
+        self._line_count_lbl.setStyleSheet(f"color: {CYAN_DIM}; border: none;")
+        footer.addWidget(self._line_count_lbl)
+        frame_lay.addLayout(footer)
+
+        self._line_count = 0
+        self._max_lines = 200  # Keep memory in check
+
+        # Boot sequence
+        from datetime import datetime
+        boot_time = datetime.now().strftime("%H:%M:%S")
+        self._add_line_internal(f"[{boot_time}] ◈ GRACE PIPELINE TERMINAL v2.0", "system")
+        self._add_line_internal(f"[{boot_time}] ◈ CONNECTED TO BACKEND NODE.JS SERVER", "system")
+        self._add_line_internal("─" * 52, "separator")
+
+    def add_line(self, text, color_type="dim"):
+        """Public API — called via signal from the pipeline."""
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        self._add_line_internal(f"[{ts}] {text}", color_type)
+
+    def _add_line_internal(self, text, color_type):
+        # Remove oldest lines if too many
+        if self._line_count > self._max_lines:
+            item = self.terminal_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+            self._line_count -= 1
+
+        line = CyberTerminalLine(text, color_type, self.terminal_content)
+        # Insert before the stretch
+        self.terminal_layout.insertWidget(self.terminal_layout.count() - 1, line)
+        self._line_count += 1
+        self._line_count_lbl.setText(f"LINES: {self._line_count}")
+
+        # Auto-scroll to bottom
+        QTimer.singleShot(50, self._scroll_to_bottom)
+
+    def _scroll_to_bottom(self):
+        vbar = self.scroll.verticalScrollBar()
+        vbar.setValue(vbar.maximum())
+
+    def set_active(self):
+        """Called when the pipeline starts processing."""
+        self._status_lbl.setText("ACTIVE")
+        self._status_lbl.setStyleSheet(f"color: {GREEN}; border: none;")
+        self._footer_lbl.setText("PROCESSING PIPELINE...")
+
+    def set_idle(self):
+        """Called when the pipeline finishes processing."""
+        self._status_lbl.setText("STANDBY")
+        self._status_lbl.setStyleSheet(f"color: {CYAN_DIM}; border: none;")
+        self._footer_lbl.setText("AWAITING PIPELINE EVENT...")
+
+    def add_separator(self):
+        """Add a visual separator line."""
+        self._add_line_internal("─" * 52, "separator")
 
 # ──────────────────────────────────────────
 # CIRCUIT BOARD BACKGROUND (Animated Faint Traces)
@@ -2337,3 +2820,353 @@ class ContextPanel(QWidget):
             self._revert_timer.timeout.connect(self.set_presence_mode)
         self._revert_timer.start(8000)
 
+
+# ──────────────────────────────────────────
+# HOLOGRAPHIC CALENDAR WINDOW (Slim Cyberpunk)
+# ──────────────────────────────────────────
+
+class HoloCalendarWidget(QDialog):
+    WINDOW_W = 420
+
+    def __init__(self, calendar_data, parent=None):
+        super().__init__(parent)
+        self.calendar_data = calendar_data
+        self._drag_pos = None
+        self._scan_phase = 0.0
+        self._border_phase = 0.0
+
+        self.setWindowFlags(
+            Qt.WindowType.Dialog |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.init_ui()
+
+        # Calculate height dynamically based on event count (slim!)
+        event_count = len(calendar_data.get('events', []))
+        base_h = 120  # header + footer
+        per_event = 72
+        self.WINDOW_H = min(550, max(200, base_h + event_count * per_event))
+
+        # Position: right side of screen
+        screen = QGuiApplication.primaryScreen().geometry()
+        self._x_pos = screen.width() - self.WINDOW_W - 40
+        self._y_pos = max(60, screen.height() // 2 - self.WINDOW_H // 2)
+
+        self.setGeometry(self._x_pos, self._y_pos, 4, self.WINDOW_H)
+        self.setWindowOpacity(0.0)
+
+        # ── Opening Animation ──
+        self.anim_group = QSequentialAnimationGroup(self)
+
+        op = QPropertyAnimation(self, b"windowOpacity")
+        op.setDuration(150)
+        op.setStartValue(0.0)
+        op.setEndValue(1.0)
+
+        geom = QPropertyAnimation(self, b"geometry")
+        geom.setDuration(300)
+        geom.setStartValue(QRect(self._x_pos + self.WINDOW_W, self._y_pos, 4, self.WINDOW_H))
+        geom.setEndValue(QRect(self._x_pos, self._y_pos, self.WINDOW_W, self.WINDOW_H))
+        geom.setEasingCurve(QEasingCurve.Type.OutExpo)
+
+        self.anim_group.addAnimation(op)
+        self.anim_group.addAnimation(geom)
+
+        # ── Animated scanline & border pulse ──
+        self._scan_timer = QTimer(self)
+        self._scan_timer.timeout.connect(self._tick_scan)
+        self._scan_timer.start(30)
+
+    def _tick_scan(self):
+        self._scan_phase += 0.008
+        if self._scan_phase > 1.3:
+            self._scan_phase = -0.3
+        self._border_phase += 0.03
+        self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.anim_group.start()
+        self.glitch_overlay.start_glitch(500)
+        QTimer.singleShot(450, self.populate_data)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        if w < 10 or h < 10:
+            return
+
+        # ── Deep radial gradient background ──
+        radial = QRadialGradient(w * 0.5, h * 0.3, max(w, h) * 0.8)
+        radial.setColorAt(0.0, QColor(5, 15, 25, 240))
+        radial.setColorAt(0.4, QColor(2, 5, 10, 245))
+        radial.setColorAt(1.0, QColor(1, 2, 4, 250))
+        p.setBrush(QBrush(radial))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(0, 0, w, h, 6, 6)
+
+        # ── Subtle horizontal scanline sweep ──
+        scan_y = int(self._scan_phase * h)
+        scan_grad = QLinearGradient(0, scan_y - 30, 0, scan_y + 30)
+        scan_grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+        scan_grad.setColorAt(0.5, QColor(0, 212, 255, 18))
+        scan_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.fillRect(0, scan_y - 30, w, 60, scan_grad)
+        # Thin bright line at center
+        p.setPen(QPen(QColor(0, 212, 255, 35), 1))
+        p.drawLine(0, scan_y, w, scan_y)
+
+        # ── Glowing animated border ──
+        pulse = int(25 + 15 * math.sin(self._border_phase))
+        border_color = QColor(0, 212, 255, pulse)
+        p.setPen(QPen(border_color, 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(1, 1, w - 2, h - 2, 6, 6)
+
+        # ── Corner accents (bright blue tick marks) ──
+        accent = QColor(0, 212, 255, 150)
+        p.setPen(QPen(accent, 2))
+        corner_len = 18
+        # Top-left
+        p.drawLine(2, 2, 2 + corner_len, 2)
+        p.drawLine(2, 2, 2, 2 + corner_len)
+        # Top-right
+        p.drawLine(w - 2, 2, w - 2 - corner_len, 2)
+        p.drawLine(w - 2, 2, w - 2, 2 + corner_len)
+        # Bottom-left
+        p.drawLine(2, h - 2, 2 + corner_len, h - 2)
+        p.drawLine(2, h - 2, 2, h - 2 - corner_len)
+        # Bottom-right
+        p.drawLine(w - 2, h - 2, w - 2 - corner_len, h - 2)
+        p.drawLine(w - 2, h - 2, w - 2, h - 2 - corner_len)
+
+    def init_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(0)
+
+        # ── Header ──
+        header = QHBoxLayout()
+        header.setSpacing(8)
+
+        icon = QLabel("◈")
+        icon.setFont(mono(10, True))
+        icon.setFixedSize(20, 20)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet("color: #00D4FF; border: 1px solid rgba(0,212,255,0.6); border-radius: 10px; background: rgba(0,212,255,0.08);")
+        header.addWidget(icon)
+
+        title = QLabel("CHRONOS")
+        title.setFont(mono(10, True))
+        title.setStyleSheet("color: #00D4FF; letter-spacing: 3px; background: transparent; border: none;")
+        header.addWidget(title)
+
+        # Subtle status dot
+        dot = QLabel("●")
+        dot.setFont(mono(6))
+        dot.setStyleSheet("color: #00D4FF; background: transparent; border: none;")
+        header.addWidget(dot)
+
+        subtitle = QLabel("LIVE")
+        subtitle.setFont(mono(7, True))
+        subtitle.setStyleSheet("color: rgba(0,212,255,0.6); letter-spacing: 2px; background: transparent; border: none;")
+        header.addWidget(subtitle)
+
+        header.addStretch()
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(24, 24)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton { color: #00D4FF; background: transparent; border: 1px solid rgba(0,212,255,0.3); font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: rgba(0,212,255,0.2); border: 1px solid #00D4FF; }
+        """)
+        btn_close.clicked.connect(self.close_window)
+        header.addWidget(btn_close)
+
+        root.addLayout(header)
+
+        # ── Divider ──
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 transparent, stop:0.3 rgba(0,212,255,80), stop:0.7 rgba(0,212,255,80), stop:1 transparent);")
+        root.addSpacing(6)
+        root.addWidget(div)
+        root.addSpacing(8)
+
+        # ── Scroll Area for events ──
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { background: transparent; width: 4px; }
+            QScrollBar::handle:vertical { background: rgba(0,212,255,0.4); border-radius: 2px; min-height: 20px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setSpacing(6)
+        self.scroll_layout.setContentsMargins(0, 0, 4, 0)
+
+        scroll.setWidget(self.scroll_content)
+        root.addWidget(scroll)
+
+        # ── Footer ──
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 6, 0, 0)
+        f_lbl = QLabel("◇ GOOGLE CALENDAR API")
+        f_lbl.setFont(mono(7))
+        f_lbl.setStyleSheet("color: rgba(0,212,255,0.35); background: transparent; border: none; letter-spacing: 1px;")
+        footer.addWidget(f_lbl)
+        footer.addStretch()
+
+        from datetime import datetime
+        ts_lbl = QLabel(datetime.now().strftime("%H:%M:%S IST"))
+        ts_lbl.setFont(mono(7))
+        ts_lbl.setStyleSheet("color: rgba(0,212,255,0.35); background: transparent; border: none;")
+        footer.addWidget(ts_lbl)
+        root.addLayout(footer)
+
+        # ── Glitch overlay ──
+        self.glitch_overlay = GlitchOverlay(self)
+        self.glitch_overlay.setGeometry(0, 0, self.WINDOW_W, 600)
+        self.glitch_overlay.raise_()
+
+    def populate_data(self):
+        events = self.calendar_data.get('events', [])
+        if not events:
+            lbl = QLabel("NO EVENTS FOUND")
+            lbl.setFont(mono(9))
+            lbl.setStyleSheet("color: rgba(0,212,255,0.5); background: transparent; border: none;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.scroll_layout.addWidget(lbl)
+        else:
+            from datetime import datetime
+            for i, ev in enumerate(events):
+                card = QFrame()
+                card.setStyleSheet("""
+                    QFrame {
+                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                            stop:0 rgba(0,212,255,0.06), stop:1 rgba(0,212,255,0.02));
+                        border-left: 2px solid rgba(0,212,255,0.5);
+                        border-bottom: 1px solid rgba(0,212,255,0.08);
+                    }
+                """)
+                card_lay = QHBoxLayout(card)
+                card_lay.setContentsMargins(10, 8, 10, 8)
+                card_lay.setSpacing(10)
+
+                # ── Time badge ──
+                start_str = ev.get('start', '')
+                try:
+                    dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                    time_str = dt.strftime("%I:%M %p")
+                    date_str = dt.strftime("%b %d")
+                except Exception:
+                    time_str = "—"
+                    date_str = start_str[:10] if len(start_str) >= 10 else "—"
+
+                time_badge = QFrame()
+                time_badge.setFixedWidth(62)
+                time_badge.setStyleSheet("background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.2); border-radius: 3px;")
+                tb_lay = QVBoxLayout(time_badge)
+                tb_lay.setContentsMargins(4, 4, 4, 4)
+                tb_lay.setSpacing(0)
+
+                t1 = QLabel(time_str)
+                t1.setFont(mono(8, True))
+                t1.setStyleSheet("color: #00D4FF; background: transparent; border: none;")
+                t1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                tb_lay.addWidget(t1)
+
+                t2 = QLabel(date_str)
+                t2.setFont(mono(7))
+                t2.setStyleSheet("color: rgba(0,212,255,0.6); background: transparent; border: none;")
+                t2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                tb_lay.addWidget(t2)
+
+                card_lay.addWidget(time_badge)
+
+                # ── Event info ──
+                info_lay = QVBoxLayout()
+                info_lay.setSpacing(2)
+
+                summary = ev.get('summary', 'Untitled')
+                s_lbl = QLabel(summary)
+                s_lbl.setFont(mono(9, True))
+                s_lbl.setStyleSheet("color: #E0F7FA; background: transparent; border: none;")
+                s_lbl.setWordWrap(True)
+                info_lay.addWidget(s_lbl)
+
+                desc = ev.get('description', '')
+                if desc:
+                    d_lbl = QLabel(desc[:80] + ("…" if len(desc) > 80 else ""))
+                    d_lbl.setFont(sans(8))
+                    d_lbl.setStyleSheet("color: rgba(224,247,250,0.55); background: transparent; border: none;")
+                    d_lbl.setWordWrap(True)
+                    info_lay.addWidget(d_lbl)
+
+                card_lay.addLayout(info_lay)
+
+                # ── Fade-in animation per card ──
+                opacity_fx = QGraphicsOpacityEffect(card)
+                card.setGraphicsEffect(opacity_fx)
+                opacity_fx.setOpacity(0.0)
+                anim = QPropertyAnimation(opacity_fx, b"opacity")
+                anim.setDuration(300)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+                QTimer.singleShot(i * 120, anim.start)
+                # prevent garbage collection
+                card._fade_anim = anim
+
+                self.scroll_layout.addWidget(card)
+
+        self.scroll_layout.addStretch()
+
+    def close_window(self):
+        self.glitch_overlay.start_glitch(350)
+        # Reverse slide animation
+        close_anim = QPropertyAnimation(self, b"geometry")
+        close_anim.setDuration(250)
+        close_anim.setStartValue(self.geometry())
+        close_anim.setEndValue(QRect(self.x() + self.WINDOW_W, self.y(), 4, self.height()))
+        close_anim.setEasingCurve(QEasingCurve.Type.InExpo)
+
+        fade = QPropertyAnimation(self, b"windowOpacity")
+        fade.setDuration(200)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
+
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(close_anim)
+        group.addAnimation(fade)
+        group.finished.connect(self.accept)
+        group.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'glitch_overlay'):
+            self.glitch_overlay.setGeometry(0, 0, self.width(), self.height())
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if hasattr(self, '_drag_pos') and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        event.accept()

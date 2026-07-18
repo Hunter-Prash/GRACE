@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const region = process.env.AWS_REGION || 'us-east-1';
+const region = process.env.AWS_REGION || 'ap-south-1';
 const snsClient = new SNSClient({ region: region });
 
 export const sendIndexerNotification = async (summary, newRecordsCount, duplicateCount) => {

@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { upsertQuery, getEmbedding } from "../services/rag.service.js";
+import { upsertQuery, getEmbedding, deleteRecord } from "../services/rag.service.js";
 import { getISTTimestamp } from "../services/db.client.js";
 import { sendIndexerNotification } from "../services/sns.service.js";
 import { logToDiscord } from "../services/logger.service.js";
@@ -41,7 +41,7 @@ export const runMemoryIndexer = async (unindexedConversations) => {
 
     await logToDiscord(`[Indexer] Split payload into ${rawBatches.length} batch(es) to protect the 250k token context window.`);
 
-    // 3. Summarization with Gemini 2.5 Flash Lite
+    // 3. Summarization with Gemini 3.1 Flash Lite
     const allSummarizedFacts = [];
     const todayIST = getISTTimestamp().split('T')[0];
     const summarizationPrompt = `
@@ -50,7 +50,7 @@ Write a comprehensive, dense paragraph summarizing all the concrete facts, life 
 Completely ignore small talk, greetings, filler words, and routine task outputs. But if the user is letting his emotions out or updating about a genral life events(like going on a trip / watching a movie/ completing a game etc...) then KEEP IT..
 Do NOT use bullet points. Write a continuous narrative summary.
 CRITICAL INSTRUCTION 1: Include the current date [${todayIST}] contextually if recording new events.
-CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, news articles, file contents, code blocks, or directory listings (e.g. from local file system tools), COMPLETELY IGNORE THEM. IGNORE  local file changes (creation+deletes) done via MCP server.Do NOT summarize or index web search content or local file outputs. Only index personal facts, goals, and user-specific data.
+CRITICAL INSTRUCTION 2: If the transcript contains raw web search results, calendar event data (e.g. creating/fetching events), database queries, finance transactions, expense logs, news articles, file contents, code blocks, or directory listings (e.g. from local file system tools), COMPLETELY IGNORE THEM. IGNORE local file changes (creation+deletes) done via MCP server. Do NOT summarize or index web search content, database logs, finance/expense outputs, calendar events, or local file outputs. Only index personal facts, goals, emotions, and user-specific narrative data to conserve vector space.
 CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifically asked GRACE to remember .. Even if its a web search/local file system updates /articles/ etc.... do not remove them ... 
     `;
 
@@ -60,14 +60,14 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
             await sleep(8000);
         }
 
-        await logToDiscord(`[Indexer] Sending Batch ${i + 1} to gemini-2.5-flash-lite for summarization...`);
+        await logToDiscord(`[Indexer] Sending Batch ${i + 1} to gemini-3.5-flash-lite for summarization...`);
         try {
             let response;
             let retries = 3;
             while (retries > 0) {
                 try {
                     response = await ai.models.generateContent({
-                        model: 'gemini-2.5-flash-lite',
+                        model: 'gemini-3.1-flash-lite',
                         contents: `${summarizationPrompt}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
                     });
                     break;
@@ -85,7 +85,9 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
 
             allSummarizedFacts.push(response.text);
         } catch (err) {
+            await logToDiscord(`[Indexer] Failed to summarize batch ${i + 1}: ${err.message}`);
             console.error(`[Indexer] Failed to summarize batch ${i + 1}:`, err.message);
+            throw err; // Throwing the error prevents the database from marking these as 'indexed' so it can retry later.this is called bubbling-up.. throw the error to the fucntion who called this fucntion
         }
     }
 
@@ -114,23 +116,61 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
         const pineconeRes = await getEmbedding(doc.pageContent, 1);
 
         let isDuplicate = false;
+        let finalChunkText = doc.pageContent;
+
         if (pineconeRes && pineconeRes.result && pineconeRes.result.hits && pineconeRes.result.hits.length > 0) {
-            // Pinecone llama-text-embed-v2 uses 'score' or '_score'. Using 0.35 threshold to drop semantically near-identical duplicates.
-            const score = pineconeRes.result.hits[0]._score || pineconeRes.result.hits[0]._score;
-            if (score > 0.35) {
-                isDuplicate = true;
-                duplicatesDropped++;
-                console.log(`[Indexer] Chunk ${idx + 1} is a duplicate (score: ${score.toFixed(3)}). Dropping.`);
+            const hit = pineconeRes.result.hits[0];
+            const score = hit._score || hit.score;
+            
+            if (score > 0.45) {
+                // Extract timestamp of the matching vector to see how old it is
+                const oldId = hit._id || hit.id || "";
+                const idParts = oldId.split('-');
+                let hoursSinceOld = 999;
+                
+                if (idParts.length >= 3 && !isNaN(idParts[2])) {
+                    const oldTimestamp = parseInt(idParts[2], 10);
+                    hoursSinceOld = (Date.now() - oldTimestamp) / (1000 * 60 * 60);
+                }
+                
+                if (score > 0.85) {
+                    // Almost identical verbatim string -> Always drop
+                    isDuplicate = true;
+                    duplicatesDropped++;
+                    console.log(`[Indexer] Chunk ${idx + 1} is an exact duplicate (score: ${score.toFixed(3)}). Dropping.`);
+                } else if (score > 0.45 && hoursSinceOld < 24) {
+                    // Very similar and happened recently -> likely conversation overlap, drop it
+                    isDuplicate = true;
+                    duplicatesDropped++;
+                    console.log(`[Indexer] Chunk ${idx + 1} is a recent duplicate (score: ${score.toFixed(3)}, age: ${hoursSinceOld.toFixed(1)}h). Dropping.`);
+                } else {
+                    // It's similar, but it's an OLD memory (>24h). This is likely a STATE UPDATE! Keep it.
+                    isDuplicate = false;
+                    const oldText = hit.fields?.text || hit.text || hit.fields?.chunk_text || "";
+                    
+                    // Code-based compaction: merge strings and delete old vector
+                    finalChunkText = oldText + "\n[Update]: " + doc.pageContent;
+                    
+                    // Safety valve: prevent exceeding embedding model token limits
+                    if (finalChunkText.length > 25000) {
+                        finalChunkText = finalChunkText.slice(-25000);
+                        console.log(`[Indexer] Chunk ${idx + 1} string exceeded 25000 chars. Truncated to preserve newest state.`);
+                    }
+
+                    console.log(`[Indexer] Chunk ${idx + 1} matches an old memory (score: ${score.toFixed(3)}, age: ${hoursSinceOld.toFixed(1)}h). Compacting via code and deleting old vector ${oldId}.`);
+                    
+                    await deleteRecord(oldId);
+                }
             }
         }
 
         if (!isDuplicate) {
             newPineconeRecords.push({
                 _id: `chat-memory-${Date.now()}-${idx}`,
-                text: doc.pageContent,
+                text: finalChunkText,
                 category: "chat_history"
             });
-            console.log(`[Indexer] Chunk ${idx + 1} is NEW. Queuing for upsert.`);
+            console.log(`[Indexer] Chunk ${idx + 1} is NEW/COMPACTED. Queuing for upsert.`);
         }
 
         // Small sleep to respect Pinecone embedding API limits if many chunks

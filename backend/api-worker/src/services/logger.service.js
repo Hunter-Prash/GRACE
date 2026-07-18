@@ -1,9 +1,11 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
-
-const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 export const logToDiscord = async (message, isImportant = false) => {
     // We also want to log it to the standard console
@@ -13,6 +15,7 @@ export const logToDiscord = async (message, isImportant = false) => {
         console.log(message);
     }
 
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     if (!webhookUrl) {
         return;
     }

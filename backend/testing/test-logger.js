@@ -1,4 +1,4 @@
-import { logToDiscord } from "../src/services/logger.service.js";
+import { logToDiscord } from "../api-worker/src/services/logger.service.js";
 
 async function testLogger() {
     console.log("Testing Discord Webhook Logger...");

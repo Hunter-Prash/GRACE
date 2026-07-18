@@ -6,3 +6,5 @@ node_modules/
 backend/.env
 .aws-sam/
 samconfig.toml
+credentials.json
+token.json
