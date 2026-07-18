@@ -1,4 +1,4 @@
-﻿addict==2.4.0
+addict==2.4.0
 aiohappyeyeballs==2.6.2
 aiohttp==3.14.0
 aiosignal==1.4.0
@@ -67,9 +67,6 @@ murmurhash==1.0.15
 networkx==3.4.2
 num2words==0.5.14
 numpy==2.2.6
-nvidia-cublas-cu12==12.9.2.10
-nvidia-cuda-nvrtc-cu12==12.9.86
-nvidia-cudnn-cu12==9.23.0.39
 onnxruntime==1.23.2
 openwakeword==0.6.0
 packaging==26.2

@@ -79,7 +79,7 @@ async def pipeline_async(hud):
             input=True, frames_per_buffer=CHUNK_SIZE, stream_callback=mic_callback)
         spk_stream = audio.open(
             format=pyaudio.paInt16, channels=1, rate=24000,
-            output=True, frames_per_buffer=CHUNK_SIZE, stream_callback=speaker_callback)
+            output=True, frames_per_buffer=CHUNK_SIZE)
     except Exception as e:
         print(f"Warning: Audio device missing. Voice disabled. ({e})")
         mic_stream = None
@@ -172,6 +172,20 @@ async def pipeline_async(hud):
                     json.dump(quota_data, f)
     except Exception as e:
         print(f"Failed to initialize daily briefing: {e}")
+
+    def _playback_worker():
+        from core.audio import speaker_queue
+        while True:
+            try:
+                import queue
+                chunk = speaker_queue.get(timeout=0.1)
+                if spk_stream:
+                    spk_stream.write(chunk)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[Playback Worker Error] {e}")
+    threading.Thread(target=_playback_worker, daemon=True).start()
 
     active_session = False
     session_input_tokens = 0
@@ -276,8 +290,12 @@ async def pipeline_async(hud):
 
             if not active_session:
                 try:
-                    data = mic_queue.get(timeout=0.1)
+                    data = mic_queue.get_nowait()
                     pcm  = np.frombuffer(data, dtype=np.int16)
+                except queue.Empty:
+                    await asyncio.sleep(0.01)
+                    continue
+                try:
                     audio_buffer.append(pcm)
 
                     pred = oww_model.predict(pcm)

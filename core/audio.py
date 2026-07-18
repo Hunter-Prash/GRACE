@@ -37,14 +37,28 @@ def mic_callback(in_data, frame_count, time_info, status):
     mic_queue.put(in_data)
     return (None, pyaudio.paContinue)
 
+speaker_buffer = bytearray()
+speaker_lock = threading.Lock()
+
 def speaker_callback(in_data, frame_count, time_info, status):
-    try:
-        data = speaker_queue.get_nowait()
-        expected = frame_count * 2
-        if len(data) < expected:
-            data += b'\x00' * (expected - len(data))
-    except queue.Empty:
-        data = b'\x00' * (frame_count * 2)
+    global speaker_buffer
+    expected = frame_count * 2
+    
+    with speaker_lock:
+        # Drain all available chunks into the continuous buffer
+        while not speaker_queue.empty():
+            try:
+                speaker_buffer.extend(speaker_queue.get_nowait())
+            except queue.Empty:
+                break
+                
+        if len(speaker_buffer) < expected:
+            data = bytes(speaker_buffer) + b'\x00' * (expected - len(speaker_buffer))
+            speaker_buffer.clear()
+        else:
+            data = bytes(speaker_buffer[:expected])
+            speaker_buffer = speaker_buffer[expected:]
+            
     return (data, pyaudio.paContinue)
 
 async def synthesize_speech(text: str) -> bytes:
@@ -69,7 +83,7 @@ async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_
     """Stream TTS generation directly to speaker_queue and monitor for interruptions."""
     with speaker_queue.mutex:
         speaker_queue.queue.clear()
-        
+                
     is_generating = [True]
     interrupted = [False]
     all_bytes = []
@@ -77,8 +91,10 @@ async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_
     def _run_kokoro():
         try:
             clean_text = re.sub(r'[*`~_#]', '', text)
+            print(f"[DEBUG] Kokoro starting text: {clean_text[:50]}")
             generator = kokoro_pipeline(clean_text, voice=KOKORO_VOICE, speed=1.2, split_pattern=r'[.!?]+')
             for _, _, audio in generator:
+                print(f"[DEBUG] Kokoro chunk generated, size: {len(audio) if audio is not None else 0}")
                 if interrupted[0]:
                     break
                 if audio is not None and len(audio) > 0:
@@ -94,7 +110,12 @@ async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_
                     chunk_len = CHUNK_SIZE * 2
                     for i in range(0, len(audio_bytes), chunk_len):
                         speaker_queue.put(audio_bytes[i:i+chunk_len])
+        except Exception as e:
+            print(f"[DEBUG] Kokoro EXCEPTION: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
+            print("[DEBUG] Kokoro thread FINISHED")
             is_generating[0] = False
 
     # Start generator thread
@@ -103,6 +124,10 @@ async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_
     
     hud.set_state(STATE_SPEAKING)
     
+    # Clear leftover mic buffer so background noise doesn't trigger instant interruption
+    with mic_queue.mutex:
+        mic_queue.queue.clear()
+
     # Wait for completion while checking for interruptions
     while is_generating[0] or not speaker_queue.empty():
         if text_input_queue and not text_input_queue.empty():
@@ -110,13 +135,11 @@ async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_
             with speaker_queue.mutex:
                 speaker_queue.queue.clear()
             break
-            
         if cmd_queue and not cmd_queue.empty():
             interrupted[0] = True
             with speaker_queue.mutex:
                 speaker_queue.queue.clear()
             break
-            
         try:
             mic_data = mic_queue.get_nowait()
             pcm = np.frombuffer(mic_data, dtype=np.int16)
@@ -186,6 +209,8 @@ async def play_audio_with_interruption(audio_bytes: bytes) -> bool:
     for i in range(0, len(audio_bytes), chunk_len):
         speaker_queue.put(audio_bytes[i:i+chunk_len])
     interrupted = False
+    with mic_queue.mutex:
+        mic_queue.queue.clear()
     while not speaker_queue.empty():
         try:
             mic_data = mic_queue.get_nowait()
@@ -210,6 +235,8 @@ def play_audio_sync(audio_bytes: bytes, hud):
     for i in range(0, len(audio_bytes), chunk_len):
         speaker_queue.put(audio_bytes[i:i+chunk_len])
         
+    with mic_queue.mutex:
+        mic_queue.queue.clear()
     while not speaker_queue.empty():
         try:
             mic_data = mic_queue.get_nowait()
@@ -218,7 +245,7 @@ def play_audio_sync(audio_bytes: bytes, hud):
             if vol >= SILENCE_THRESHOLD + 150:
                 with speaker_queue.mutex:
                     speaker_queue.queue.clear()
-                break
+#                     #                 break
         except queue.Empty:
             pass
         time.sleep(0.01)

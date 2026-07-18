@@ -2,7 +2,7 @@ import os
 import sys
 import yaml
 
-os.environ["HF_HOME"] = "D:\\PERSONAL\\GRACE\\.cache\\huggingface"
+os.environ["HF_HOME"] = os.path.expanduser("~/.cache/huggingface")
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 MY_GEMINI_KEY = None
@@ -30,8 +30,8 @@ SILENCE_THRESHOLD = 250
 MAX_SILENCE_CHUNKS = 40
 CHUNK_SIZE = 1280
 KOKORO_VOICE = "af_sarah"  # Options: af_heart, af_bella, af_sarah, bf_emma
-FFMPEG_PATH  = r"C:\Users\Prashant\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
-FFPROBE_PATH = r"C:\Users\Prashant\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffprobe.exe"
+FFMPEG_PATH  = "/usr/bin/ffmpeg"
+FFPROBE_PATH = "/usr/bin/ffprobe"
 
 # STATE CONSTANTS
 STATE_IDLE       = "IDLE"
