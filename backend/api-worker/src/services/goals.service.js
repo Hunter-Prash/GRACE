@@ -52,6 +52,21 @@ export async function getActiveGoals() {
     }
 }
 
+// Get ALL GRACE goals (Active and Completed)
+export async function getAllGoals() {
+    try {
+        const scanCommand = new ScanCommand({
+            TableName: "Grace_Goals"
+        });
+
+        const response = await docClient.send(scanCommand);
+        return response.Items || [];
+    } catch (e) {
+        console.error(`WARNING: Could not fetch all goals: ${e.message}`);
+        throw e;
+    }
+}
+
 // Update a specific milestone without overwriting the whole map
 export async function updateMilestone(GoalId, milestoneKey, isComplete) {
     try {

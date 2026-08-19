@@ -1,8 +1,7 @@
-◇ injected env (0) from ../.env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+◇ injected env (0) from ../.env // tip: ⌁ auth for agents [www.vestauth.com]
 Could not load config.yaml. Using environment variables instead.
-◇ injected env (0) from ../.env // tip: ⌘ override existing { override: true }
-◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
-◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+◇ injected env (0) from ../.env // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
 [CALENDAR] Loaded existing token.json successfully.
 GRACE Backend running on http://localhost:3000
-[DB] Erased short-term history for session: default

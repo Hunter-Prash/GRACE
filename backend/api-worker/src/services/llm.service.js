@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { getGeminiKey } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
-import { createGoal, updateMilestone, getActiveGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
+import { createGoal, updateMilestone, getActiveGoals, getAllGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
 import { updateDailyMetrics, getAllDailyMetrics } from './metrics.service.js';
 import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
@@ -235,7 +235,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 }
                 else if (call.name === "updateDailyMetrics") {
                     const args = call.args;
-                    await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus);
+                    await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus, args.audience_energy, args.trigger);//audience energy is a mandatory param without it the fnc should not execute its logic
                     toolResult = { success: true, message: `Daily metrics updated.` };
                 }
                 else if (call.name === "getAllDailyMetrics") {
@@ -250,6 +250,10 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 else if (call.name === 'getActiveGoals') {
                     const goals = await getActiveGoals();
                     toolResult = { success: true, activeGoals: goals };
+                }
+                else if (call.name === 'getAllGoals') {
+                    const goals = await getAllGoals();
+                    toolResult = { success: true, allGoals: goals };
                 }
                 else if (call.name === 'getGoalMilestones') {
                     const milestones = await getGoalMilestones(call.args.goalId);

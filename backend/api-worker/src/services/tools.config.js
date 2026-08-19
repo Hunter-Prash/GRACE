@@ -37,8 +37,11 @@ export const BASE_TOOLS = [{
                     habits: { type: "ARRAY", items: { type: "STRING" }, description: "List of habits completed today" },
                     mood_score: { type: "INTEGER", description: "Score from 1 to 10" },
                     energy_lvl: { type: "INTEGER", description: "Score from 1 to 10" },
-                    core_focus: { type: "STRING" }
-                }
+                    core_focus: { type: "STRING" },
+                    audience_energy: { type: "STRING", description: "Energy of the audience, e.g. High, Medium, Low" },
+                    trigger: { type: "STRING", description: "The trigger or reason for the update" }
+                },
+                required: ["audience_energy", "trigger"]
             }
         },
         {
@@ -66,6 +69,14 @@ export const BASE_TOOLS = [{
         {
             name: "getActiveGoals",
             description: "Fetches all of Prashant's currently active goals and their milestones from the database. Use this when you need to know what goals exist, what the milestone keys are, or when he asks for a status update on his goals.",
+            parameters: {
+                type: "OBJECT",
+                properties: {} // No parameters needed
+            }
+        },
+        {
+            name: "getAllGoals",
+            description: "Fetches ALL of Prashant's goals from the database, including both 'Active' and 'Completed' ones. Use this when he asks for a general update on his goals, what he has accomplished recently, or anything related to his overall goal progress.",
             parameters: {
                 type: "OBJECT",
                 properties: {} // No parameters needed

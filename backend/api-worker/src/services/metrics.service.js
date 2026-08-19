@@ -3,10 +3,20 @@ import { docClient, getISTTimestamp } from './db.client.js';
 
 
 // UPSERT Daily Metrics
-export async function updateDailyMetrics(habits, mood_score, energy_lvl, core_focus) {
+export async function updateDailyMetrics(habits, mood_score, energy_lvl, core_focus, audience_energy, trigger) {
     try {
         const isoString = getISTTimestamp();
         const todayStr = isoString.split('T')[0]; // Guarantees "YYYY-MM-DD" in IST
+
+        if (!audience_energy) {
+            console.log("Audience Energy not found")
+            return;
+        }
+
+        if (!trigger) {
+            console.log("Trigger not found")
+            return;
+        }
 
         let updateParts = ["#lastUpdated = :now"];
         let expressionAttributeValues = {
@@ -36,6 +46,16 @@ export async function updateDailyMetrics(habits, mood_score, energy_lvl, core_fo
             updateParts.push("#focus = :focus");
             expressionAttributeNames["#focus"] = "CoreFocus";
             expressionAttributeValues[":focus"] = core_focus;
+        }
+        if (audience_energy !== undefined) {
+            updateParts.push("#audience_energy = :audience_energy");
+            expressionAttributeNames["#audience_energy"] = "AudienceEnergy";
+            expressionAttributeValues[":audience_energy"] = audience_energy;
+        }
+        if (trigger !== undefined) {
+            updateParts.push("#trigger = :trigger");
+            expressionAttributeNames["#trigger"] = "Trigger";
+            expressionAttributeValues[":trigger"] = trigger;
         }
 
         const params = {
