@@ -16,4 +16,8 @@ app.use('/api/goals', goalsRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/rag', ragRoutes);
 
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'healthy', service: 'api-worker' });
+});
+
 export default app;

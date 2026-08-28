@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { getGeminiKey } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
-import { createGoal, updateMilestone, getActiveGoals, getAllGoals, getGoalMilestones, deleteGoalOrMilestone } from './goals.service.js';
+import { createGoal, updateMilestone, getActiveGoals, getAllGoals, getGoalMilestones, deleteGoalOrMilestone, updateGoalStatus } from './goals.service.js';
 import { updateDailyMetrics, getAllDailyMetrics } from './metrics.service.js';
 import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
@@ -267,6 +267,24 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const args = call.args;
                     const message = await deleteGoalOrMilestone(args.goalId, args.milestoneKey);
                     toolResult = { success: true, message: message };
+                }
+                else if (call.name === "updateGoalStatus") {
+                    const args = call.args;
+                    await updateGoalStatus(args.goalId, args.status);
+                    toolResult = { success: true, message: `Goal ${args.goalId} status updated to ${args.status}.` };
+                }
+                else if (call.name === "systemHealthCheck") {
+                    try {
+                        const fetch = (await import('node-fetch')).default || global.fetch;
+                        const healthRes = await fetch("https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod/health");
+                        if (healthRes.ok) {
+                            toolResult = { success: true, message: "Lambda API is healthy and responding." };
+                        } else {
+                            toolResult = { success: false, message: "Lambda API responded with an error." };
+                        }
+                    } catch (e) {
+                        toolResult = { success: false, message: "Lambda API is unreachable." };
+                    }
                 }
                 else if (call.name === 'getCommuteTime') {
                     const args = call.args;

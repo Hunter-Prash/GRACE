@@ -95,7 +95,7 @@ export const BASE_TOOLS = [{
         },
         {
             name: "deleteGoalOrMilestone",
-            description: "Deletes an entire goal, or a specific milestone within a goal if milestoneKey is provided. Use this whenever the user asks to delete a goal or remove a milestone.",
+            description: "Deletes an entire goal, or a specific milestone within a goal if milestoneKey is provided. DO NOT use this to mark a goal as completed (use updateGoalStatus instead). Use this ONLY whenever the user explicitly asks to delete or remove a goal or milestone.",
             parameters: {
                 type: "OBJECT",
                 properties: {
@@ -103,6 +103,26 @@ export const BASE_TOOLS = [{
                     milestoneKey: { type: "STRING", description: "Optional. The specific milestone to delete. If left empty or omitted, the entire goal will be deleted." }
                 },
                 required: ["goalId"]
+            }
+        },
+        {
+            name: "updateGoalStatus",
+            description: "Updates the overall status of a goal (e.g., 'Completed', 'Active', 'Paused'). Use this when the user says they have finished or completed an entire goal.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    goalId: { type: "STRING" },
+                    status: { type: "STRING", description: "The new status, e.g. 'Completed'" }
+                },
+                required: ["goalId", "status"]
+            }
+        },
+        {
+            name: "systemHealthCheck",
+            description: "Polls the local API endpoints to check if they are healthy and responding. Use this when asked to do a health check.",
+            parameters: {
+                type: "OBJECT",
+                properties: {}
             }
         },
         {
