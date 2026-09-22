@@ -1,7 +1,49 @@
-import React from 'react'
-import { Send, Mic } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Send, Mic, MicOff } from 'lucide-react'
 
 const InputBox = ({ input, setInput, handleSend }) => {
+    const [isListening, setIsListening] = useState(false);
+    const [recognition, setRecognition] = useState(null);
+
+    useEffect(() => {
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const rec = new SpeechRecognition();
+            rec.continuous = false;
+            rec.interimResults = false;
+            
+            rec.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                setInput(prev => prev + (prev ? ' ' : '') + transcript);
+            };
+
+            rec.onerror = (event) => {
+                console.error("Speech recognition error", event.error);
+                setIsListening(false);
+            };
+
+            rec.onend = () => {
+                setIsListening(false);
+            };
+
+            setRecognition(rec);
+        }
+    }, [setInput]);
+
+    const toggleListen = () => {
+        if (!recognition) {
+            alert("Your browser does not support Speech Recognition.");
+            return;
+        }
+
+        if (isListening) {
+            recognition.stop();
+        } else {
+            recognition.start();
+            setIsListening(true);
+        }
+    };
+
     return (
         <footer className="p-2 sm:p-4 bg-gradient-to-t from-[#020404] to-transparent shrink-0 z-10">
             <div className="max-w-3xl mx-auto w-full">
@@ -23,6 +65,18 @@ const InputBox = ({ input, setInput, handleSend }) => {
                             }
                         }}
                     />
+
+                    <button
+                        type="button"
+                        onClick={toggleListen}
+                        className={`p-3 mb-0.5 rounded-lg border transition-all ${
+                            isListening 
+                                ? 'bg-red-500/20 text-red-400 border-red-500/50 hover:bg-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse' 
+                                : 'bg-cyan-950/50 text-cyan-500 border-cyan-900/50 hover:bg-cyan-900/50 hover:text-cyan-400'
+                        }`}
+                    >
+                        {isListening ? <MicOff size={20} /> : <Mic size={20} />}
+                    </button>
 
                     <button
                         type="submit"

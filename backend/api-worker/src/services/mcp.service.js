@@ -16,7 +16,7 @@ export async function initMcpClient() {
 
         const transport = new StdioClientTransport({
             command: command,
-            args: ["-y", "@modelcontextprotocol/server-filesystem", "D:\\"]
+            args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/prashant-rajaji/Desktop"]
         });
 
         mcpClient = new Client({

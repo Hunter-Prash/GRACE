@@ -5,9 +5,11 @@ import axios from 'axios'
 import Chatlog from './Components/Chatlog';
 import InputBox from './Components/InputBox';
 import HeaderOrb from './Components/HeaderOrb';
+import Login from './Components/Login';
 
 export default function App() {
 
+    const [token, setToken] = useState(localStorage.getItem('grace_token') || null);
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const bottomRef = useRef(null);
@@ -27,16 +29,34 @@ export default function App() {
 
             const response = await axios.post(
                 "https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod/api/chat",
-                { text: input }
+                { text: input },
+                { headers: { Authorization: `Bearer ${token}` } }
             )
 
             console.log(response.data.text)
 
             // Append GRACE's response
+            const aiText = response.data.text;
             setMessages((prev) => [...prev, {
                 role: 'model',
-                parts: [{ text: response.data.text }]
+                parts: [{ text: aiText }]
             }]);
+
+            // Voice Support (Text-to-Speech)
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(aiText);
+                
+                // Try to find a female voice
+                const voices = window.speechSynthesis.getVoices();
+                const femaleVoice = voices.find(v => v.name.includes('Female') || v.name.includes('Samantha') || v.name.includes('Google US English'));
+                if (femaleVoice) {
+                    utterance.voice = femaleVoice;
+                }
+                
+                utterance.pitch = 1.1;
+                utterance.rate = 1.05;
+                window.speechSynthesis.speak(utterance);
+            }
 
             setInput("")
             setLoading(false)
@@ -48,9 +68,30 @@ export default function App() {
     }
 
     useEffect(() => {
+        // Handle Magic Link in URL
+        const queryParams = new URLSearchParams(window.location.search);
+        const magicToken = queryParams.get('magicToken');
+        
+        if (magicToken) {
+            axios.post("https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod/api/auth/magic-login", { magicToken })
+                .then(res => {
+                    localStorage.setItem('grace_token', res.data.token);
+                    setToken(res.data.token);
+                    window.history.replaceState({}, document.title, "/"); // Clean URL
+                })
+                .catch(err => {
+                    console.error("Magic link failed", err);
+                    alert("Magic link invalid or expired.");
+                });
+        }
+
+        if (!token) return;
+
         const fetchChat = async () => {
             try {
-                let response = await axios.get("https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod/api/history/default")
+                let response = await axios.get("https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod/api/history/default", {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
                 console.log(response.data.history)
                 setMessages(response.data.history)
             } catch (e) {
@@ -58,7 +99,11 @@ export default function App() {
             }
         }
         fetchChat()
-    }, [])
+    }, [token])
+
+    if (!token) {
+        return <Login setToken={setToken} />;
+    }
 
     //sam deploy --stack-name grace-backend-stack --no-confirm-changeset --resolve-s3 --capabilities CAPABILITY_IAM
 
