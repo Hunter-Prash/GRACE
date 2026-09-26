@@ -6,11 +6,15 @@ import metricsRoutes from './src/routes/metrics.routes.js';
 import ragRoutes from './src/routes/rag.routes.js';
 import authRoutes from './src/routes/auth.routes.js';
 import { verifyToken } from './src/middleware/auth.js';
+import { healthCheckMiddleware } from './src/middleware/healthCheck.js';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Apply health check middleware to all /api routes
+app.use('/api', healthCheckMiddleware);
 
 // Mount routers
 app.use('/api/auth', authRoutes);

@@ -50,7 +50,8 @@ def rag_monitor_thread(hud):
     """Background thread to fetch RAG and DB stats from the backend every 15 seconds."""
     while True:
         try:
-            resp = requests.get(f"{API_STATE['url']}/api/rag/stats", timeout=10.0)
+            headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+            resp = requests.get(f"{API_STATE['url']}/api/rag/stats", headers=headers, timeout=10.0)
             if resp.status_code == 200:
                 hud.sig_rag_stats.emit(resp.json())
         except Exception:
@@ -90,7 +91,8 @@ async def pipeline_async(hud):
 
     try:
         def fetch_history():
-            return requests.get(f"{API_STATE['url']}/api/history/default", timeout=5).json()
+            headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+            return requests.get(f"{API_STATE['url']}/api/history/default", headers=headers, timeout=5).json()
         db_response = await asyncio.to_thread(fetch_history)
         if isinstance(db_response, dict) and "history" in db_response:
             db_history = db_response.get("history", [])
@@ -143,7 +145,8 @@ async def pipeline_async(hud):
             # 1. Fetch raw goals data from backend for the UI Side Panel
             def fetch_goals():
                 try:
-                    return requests.get(f"{API_STATE['url']}/api/goals/active", timeout=5).json()
+                    headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+                    return requests.get(f"{API_STATE['url']}/api/goals/active", headers=headers, timeout=5).json()
                 except Exception:
                     return None
 
@@ -238,7 +241,8 @@ async def pipeline_async(hud):
                     continue
                 elif sys_cmd == "CLEAR_DYNAMO":
                     try:
-                        resp = requests.delete(f"{API_STATE['url']}/api/history/default", timeout=5)
+                        headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+                        resp = requests.delete(f"{API_STATE['url']}/api/history/default", headers=headers, timeout=5)
                         if resp.status_code == 200:
                             hud.add_message("GRACE", "Short-term memory wiped successfully.")
                             hud.sig_clear_context.emit()
@@ -250,7 +254,8 @@ async def pipeline_async(hud):
                     hud.add_message("GRACE", f"Connecting to {API_STATE['mode']} Backend...")
                     try:
                         def fetch_history():
-                            return requests.get(f"{API_STATE['url']}/api/history/default", timeout=5).json()
+                            headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+                            return requests.get(f"{API_STATE['url']}/api/history/default", headers=headers, timeout=5).json()
                         db_response = await asyncio.to_thread(fetch_history)
                         if isinstance(db_response, dict) and "history" in db_response:
                             db_history = db_response.get("history", [])
@@ -277,7 +282,8 @@ async def pipeline_async(hud):
                     continue
                 elif sys_cmd == "CLEAR_PINECONE":
                     try:
-                        resp = requests.delete(f"{API_STATE['url']}/api/pinecone", timeout=5)
+                        headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+                        resp = requests.delete(f"{API_STATE['url']}/api/pinecone", headers=headers, timeout=5)
                         if resp.status_code == 200:
                             hud.add_message("GRACE", "Pinecone Long-Term Context completely wiped.")
                         else:
@@ -362,7 +368,8 @@ async def pipeline_async(hud):
                     hud.sig_terminal_log.emit(f"  INPUT: \"{truncated}\"", "dim")
 
                     def make_api_call(text):
-                        return requests.post(f"{API_STATE['url']}/api/chat", json={"text": text, "sessionId": "default"}, timeout=120).json()
+                        headers = {"x-internal-secret": os.environ.get("JWT_SECRET", "")}
+                        return requests.post(f"{API_STATE['url']}/api/chat", json={"text": text, "sessionId": "default"}, headers=headers, timeout=120).json()
 
                     response = await asyncio.to_thread(make_api_call, user_cmd)
 
