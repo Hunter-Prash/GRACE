@@ -118,9 +118,9 @@ Resources:
         ScheduleEvent:
           Type: Schedule
           Properties:
-            Schedule: 'rate(15 minutes)'
+            Schedule: 'rate(1 hour)'
             Name: GraceProactiveSchedule
-            Description: 'Trigger Grace proactive notifications every 15 minutes'
+            Description: 'Trigger Grace proactive notifications every 1 hour'
             Enabled: true
 
 Outputs:

@@ -125,40 +125,7 @@ export const BASE_TOOLS = [{
                 properties: {}
             }
         },
-        {
-            name: "getCommuteTime",
-            description: "Gets the live ETA, drive time, and exact distance between any two locations or cities. MUST call this whenever the user asks for the distance, route, or commute time between places.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    origin: { type: "STRING", description: "The starting address or landmark" },
-                    destination: { type: "STRING", description: "The destination address or landmark" }
-                },
-                required: ["origin", "destination"]
-            }
-        },
-        {
-            name: "getNearbyPlaces",
-            description: "Searches for nearby places like cafes, gyms, or restaurants based on a text query.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    query: { type: "STRING", description: "What to search for, e.g., 'gyms near HITEC City', 'best coffee shops'" }
-                },
-                required: ["query"]
-            }
-        },
-        {
-            name: "searchWeb",
-            description: "Performs a live web search using DuckDuckGo and returns text snippets of the top results. Use this whenever the user asks for real-time information, news, current events, factual lookups, or asks you to search the web.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    query: { type: "STRING", description: "The precise search query to look up on the web" }
-                },
-                required: ["query"]
-            }
-        },
+
         {
             name: "detectFileOperation",
             description: "Triggers the scene_mode context panel in the GUI to show a directory preview. Call this when you perform or detect ANY file operation including reading, viewing, creation, modification, or deletion.",

@@ -37,12 +37,13 @@ const checkPinecone = async () => {
     }
 };
 
-const updateHealthCache = async () => {
+export const performFullHealthCheck = async () => {
     const [dynamoUp, pineconeUp] = await Promise.all([checkDynamoDB(), checkPinecone()]);
     healthCache.services.dynamodb = dynamoUp;
     healthCache.services.pinecone = pineconeUp;
     healthCache.isHealthy = dynamoUp && pineconeUp;
     healthCache.lastChecked = Date.now();
+    return healthCache;
 };
 
 export const healthCheckMiddleware = async (req, res, next) => {
@@ -51,7 +52,7 @@ export const healthCheckMiddleware = async (req, res, next) => {
     // If cache is expired, kick off a background refresh (don't block THIS request)
     if (now - healthCache.lastChecked > CHECK_INTERVAL) {
         // Kick off asynchronously so we don't add latency to the user
-        updateHealthCache().catch(console.error);
+        performFullHealthCheck().catch(console.error);
         
         // Prevent multiple simultaneous checks on first boot
         if (healthCache.lastChecked === 0) {

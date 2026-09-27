@@ -5,15 +5,13 @@ import { createGoal, updateMilestone, getActiveGoals, getAllGoals, getGoalMilest
 import { updateDailyMetrics, getAllDailyMetrics } from './metrics.service.js';
 import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
-import { getCommuteTime, getNearbyPlaces } from './maps.service.js';
 import { logToDiscord } from './logger.service.js';
-import { searchWeb } from './webSearch.service.js';
 import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
 import { getCurrentDateTime } from './datetime.service.js';
 import { getCalendarEvents, scheduleEvent, rescheduleEvent, cancelEvent } from './calendar.service.js';
 import { getTransactions, addTransaction } from './finance.service.js';
 import { BASE_TOOLS } from './tools.config.js';
-
+import { performFullHealthCheck } from '../middleware/healthCheck.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function safeSendMessage(chat, payload, maxRetries = 3) {
@@ -275,37 +273,15 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 }
                 else if (call.name === "systemHealthCheck") {
                     try {
-                        const fetch = (await import('node-fetch')).default || global.fetch;
-                        const healthRes = await fetch("https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod/health");
-                        if (healthRes.ok) {
-                            toolResult = { success: true, message: "Lambda API is healthy and responding." };
+                        const status = await performFullHealthCheck();
+                        if (status.isHealthy) {
+                            toolResult = { success: true, message: `All core services are online. Details: ${JSON.stringify(status.details)}` };
                         } else {
-                            toolResult = { success: false, message: "Lambda API responded with an error." };
+                            toolResult = { success: false, message: `Some core services are offline. Details: ${JSON.stringify(status.details)}` };
                         }
                     } catch (e) {
-                        toolResult = { success: false, message: "Lambda API is unreachable." };
+                        toolResult = { success: false, message: "Health check process failed internally." };
                     }
-                }
-                else if (call.name === 'getCommuteTime') {
-                    const args = call.args;
-                    const res = await getCommuteTime(args.origin, args.destination);
-                    if (res) {
-                        toolResult = { success: true, eta: res.eta, distance: res.distance };
-                        mapData = { type: 'route', originCoords: res.originCoords, destCoords: res.destCoords };
-                    } else {
-                        toolResult = { success: true, eta: "Could not find route" };
-                    }
-                }
-                else if (call.name === 'getNearbyPlaces') {
-                    const args = call.args;
-                    const places = await getNearbyPlaces(args.query);
-                    toolResult = { success: true, places: places };
-                    mapData = { type: 'places', query: args.query, places: places };
-                }
-                else if (call.name === 'searchWeb') {
-                    const res = await searchWeb(call.args.query);
-                    toolResult = { success: true, results: res.formattedResults };
-                    searchData = res.visualData;
                 }
                 else if (call.name === 'getCurrentDateTime') {
                     const args = call.args || {};
@@ -370,7 +346,7 @@ Gemini never executes your code directly. It doesn't have access to your server,
             });
         }
 
-        // 4. Send  results BACK to Gemini in one single shot
+        //  Send  results BACK to Gemini in one single shot...if it has all the info it needs: It returns a final text string (eg. "Your systems are online and you have no active goals.") This breaks the while loop because response.functionCalls is now undefined, and the text is sent to your GUI.
         response = await safeSendMessage(chat, { message: functionResponses });
     }
 
