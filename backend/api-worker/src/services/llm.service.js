@@ -10,6 +10,7 @@ import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
 import { getCurrentDateTime } from './datetime.service.js';
 import { getCalendarEvents, scheduleEvent, rescheduleEvent, cancelEvent } from './calendar.service.js';
 import { getTransactions, addTransaction } from './finance.service.js';
+import { logWorkoutSet, getTodaysWorkout, getExerciseHistory } from './workout.service.js';
 import { BASE_TOOLS } from './tools.config.js';
 import { performFullHealthCheck } from '../middleware/healthCheck.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -326,6 +327,19 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const args = call.args;
                     const res = await addTransaction(args.amount, args.categoryName, args.description, args.dateIsoString);
                     toolResult = { success: true, transactionId: res.id, message: res.message };
+                }
+                else if (call.name === 'logWorkoutSet') {
+                    const args = call.args;
+                    const res = await logWorkoutSet(args.exerciseName, args.reps, args.weight);
+                    toolResult = { success: true, ...res };
+                }
+                else if (call.name === 'getTodaysWorkout') {
+                    const workout = await getTodaysWorkout();
+                    toolResult = { success: true, workout: workout };
+                }
+                else if (call.name === 'getExerciseHistory') {
+                    const res = await getExerciseHistory(call.args.exerciseName);
+                    toolResult = { success: true, ...res };
                 }
                 else {
                     // Assume it's an MCP tool if it's not a hardcoded local tool

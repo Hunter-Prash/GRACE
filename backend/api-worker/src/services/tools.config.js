@@ -225,6 +225,38 @@ export const BASE_TOOLS = [{
                 },
                 required: ["amount", "categoryName", "description"]
             }
+        },
+        {
+            name: "logWorkoutSet",
+            description: "Logs a new set for an exercise. The exerciseName parameter must be normalized to lowercase with hyphens (e.g., 'bench-press'). If the user makes a spelling mistake (e.g., 'bnch press'), use your intelligence to autocorrect it to the standard fitness term before calling this tool.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    exerciseName: { type: "STRING" },
+                    reps: { type: "INTEGER" },
+                    weight: { type: "NUMBER" }
+                },
+                required: ["exerciseName", "reps", "weight"]
+            }
+        },
+        {
+            name: "getTodaysWorkout",
+            description: "Fetches all of the user's exercises and sets recorded for the current day. Use this when the user asks what they did today or to summarize their current workout.",
+            parameters: {
+                type: "OBJECT",
+                properties: {}
+            }
+        },
+        {
+            name: "getExerciseHistory",
+            description: "Fetches the user's entire history for a specific exercise to track progress over time. The exerciseName must be normalized (e.g., 'bench-press').",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    exerciseName: { type: "STRING" }
+                },
+                required: ["exerciseName"]
+            }
         }
     ]
 }];
