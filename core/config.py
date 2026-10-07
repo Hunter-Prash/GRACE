@@ -26,7 +26,7 @@ if site_packages:
         if os.path.exists(cudnn_bin):  os.add_dll_directory(cudnn_bin)
 
 # AUDIO CONSTANTS
-SILENCE_THRESHOLD = 250
+SILENCE_THRESHOLD = 800
 MAX_SILENCE_CHUNKS = 40
 CHUNK_SIZE = 1280
 KOKORO_VOICE = "af_sarah"  # Options: af_heart, af_bella, af_sarah, bf_emma

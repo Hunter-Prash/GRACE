@@ -3170,3 +3170,72 @@ class HoloCalendarWidget(QDialog):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
         event.accept()
+
+class AmbientDisplayWidget(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.setSpacing(10)
+        
+        self.time_label = GlowLabel("00:00", CYAN, 84, True)
+        self.time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.date_label = GlowLabel("MONDAY, JANUARY 1", TEXT_DIM, 18, False)
+        self.date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.layout.addStretch()
+        self.layout.addWidget(self.time_label)
+        self.layout.addWidget(self.date_label)
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_time)
+        self.timer.start(1000)
+        
+        self.layout.addSpacing(40)
+        
+        self.sys_label = GlowLabel("LOADING SYS INFO...", AMBER, 12, True)
+        self.sys_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(self.sys_label)
+        
+        self.status_label = GlowLabel("ALL SYSTEMS OPTIMAL", GREEN, 12, True)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(self.status_label)
+        self.layout.addStretch()
+        
+        self.update_time()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 215)) # 215/255 approx 85% opacity
+        super().paintEvent(event)
+
+    def update_time(self):
+        from datetime import datetime
+        import time
+        import psutil
+        now = datetime.now()
+        self.time_label.setText(now.strftime("%H:%M"))
+        self.date_label.setText(now.strftime("%A, %B %d").upper())
+        
+        tz_name = time.tzname[time.daylight]
+        uptime_seconds = time.time() - psutil.boot_time()
+        hours = int(uptime_seconds // 3600)
+        minutes = int((uptime_seconds % 3600) // 60)
+        self.sys_label.setText(f"TIMEZONE: {tz_name} | OS UPTIME: {hours}H {minutes}M")
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Subtle tech circles
+        c_glow = parse_color(CYAN, 20)
+        p.setPen(QPen(c_glow, 1))
+        center = self.rect().center()
+        p.drawEllipse(center, 300, 300)
+        
+        c_glow2 = parse_color(CYAN, 10)
+        p.setPen(QPen(c_glow2, 2))
+        p.drawEllipse(center, 320, 320)

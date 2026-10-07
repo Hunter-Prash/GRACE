@@ -1,0 +1,75 @@
+Uncaught exception:
+Traceback (most recent call last):
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 90, in <module>
+    main()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 75, in main
+    hud = GraceHUD()
+          ^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 84, in __init__
+    self._setup_ambient_display()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 972, in _setup_ambient_display
+    self.ambient_opacity = QGraphicsOpacityEffect(self.ambient_display)
+                           ^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'QGraphicsOpacityEffect' is not defined
+Uncaught exception:
+Traceback (most recent call last):
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 90, in <module>
+    main()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 75, in main
+    hud = GraceHUD()
+          ^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 84, in __init__
+    self._setup_ambient_display()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 972, in _setup_ambient_display
+    self.ambient_opacity = QGraphicsOpacityEffect(self.ambient_display)
+                           ^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'QGraphicsOpacityEffect' is not defined
+Uncaught exception:
+Traceback (most recent call last):
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 90, in <module>
+    main()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 75, in main
+    hud = GraceHUD()
+          ^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 84, in __init__
+    self._setup_ambient_display()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 972, in _setup_ambient_display
+    self.ambient_opacity = QGraphicsOpacityEffect(self.ambient_display)
+                           ^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'QGraphicsOpacityEffect' is not defined
+Uncaught exception:
+Traceback (most recent call last):
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 90, in <module>
+    main()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 75, in main
+    hud = GraceHUD()
+          ^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 84, in __init__
+    self._setup_ambient_display()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 936, in _setup_ambient_display
+    self.ambient_display = AmbientDisplayWidget(self.centralWidget())
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/components.py", line 3195, in __init__
+    self.update_time()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/components.py", line 3220, in update_time
+    self.sys_label.setText(f"TIMEZONE: {tz_name} | OS UPTIME: {hours}H {minutes}M")
+    ^^^^^^^^^^^^^^
+AttributeError: 'AmbientDisplayWidget' object has no attribute 'sys_label'
+Uncaught exception:
+Traceback (most recent call last):
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 90, in <module>
+    main()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/main.py", line 75, in main
+    hud = GraceHUD()
+          ^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 84, in __init__
+    self._setup_ambient_display()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/hud.py", line 936, in _setup_ambient_display
+    self.ambient_display = AmbientDisplayWidget(self.centralWidget())
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/components.py", line 3195, in __init__
+    self.update_time()
+  File "/home/prashant-rajaji/Desktop/PERSONAL/GRACE/gui/components.py", line 3220, in update_time
+    self.sys_label.setText(f"TIMEZONE: {tz_name} | OS UPTIME: {hours}H {minutes}M")
+    ^^^^^^^^^^^^^^
+AttributeError: 'AmbientDisplayWidget' object has no attribute 'sys_label'

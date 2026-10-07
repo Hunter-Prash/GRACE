@@ -304,26 +304,10 @@ async def pipeline_async(hud):
                 try:
                     audio_buffer.append(pcm)
 
-                    pred = oww_model.predict(pcm)
-                    if pred['hey_mycroft'] > 0.75:
-                        if has_voice_profile():
-                            # Reconstruct the last ~3 seconds of audio to verify who said the wake word
-                            verification_data = np.concatenate(list(audio_buffer))
-                            is_match, score = verify_speaker(verification_data)
-                            if is_match:
-                                active_session = True
-                            else:
-                                print(f"[!] WAKE WORD REJECTED. Unknown Speaker (Score: {score:.3f})")
-                                hud.set_state("REJECTED")
-                                audio_buffer.clear()
-                                # Pause slightly before returning to IDLE
-                                await asyncio.sleep(1.5)
-                                hud.set_state(STATE_IDLE)
-                        else:
-                            active_session = True
-
-                        if active_session:
-                            audio_buffer.clear()
+                    ptt_active = getattr(hud, "is_ptt_active", False)
+                    if ptt_active:
+                        active_session = True
+                        audio_buffer.clear()
 
                 except queue.Empty:
                     continue
@@ -376,6 +360,20 @@ async def pipeline_async(hud):
                     if "error" in response:
                         hud.sig_terminal_log.emit(f"✗ API ERROR: {response['error'][:60]}", "error")
                         raise Exception(response["error"])
+                        
+                    # Check if user pressed SLEEP or CLEAR while waiting for LLM
+                    if not cmd_queue.empty():
+                        sys_cmd = cmd_queue.get_nowait()
+                        if sys_cmd == "SLEEP":
+                            active_session = False
+                            hud.set_state(STATE_IDLE)
+                            audio_buffer.clear()
+                            with mic_queue.mutex:
+                                mic_queue.queue.clear()
+                            continue
+                        else:
+                            # Put it back if it's something else
+                            cmd_queue.put(sys_cmd)
 
                     tools_used = response.get("toolsUsed", [])
                     text_answer = response.get("text", "").strip()
@@ -491,8 +489,8 @@ async def pipeline_async(hud):
                     hud.sig_terminal_log.emit("✓ PIPELINE COMPLETE // RETURNING TO IDLE", "system")
                     hud.sig_terminal_log.emit("─" * 52, "separator")
 
-                    active_session = True
-                    hud.set_state(STATE_LISTENING if interrupted else STATE_IDLE)
+                    active_session = False
+                    hud.set_state(STATE_IDLE)
 
                 except requests.exceptions.RequestException as e:
                     hud.add_message("GRACE", "Backend Connection Error. Ensure Node.js server is running.")

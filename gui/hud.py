@@ -3,11 +3,11 @@ import math
 import os
 import GPUtil
 import psutil
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame, QTabWidget, QPushButton
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame, QTabWidget, QPushButton, QGraphicsOpacityEffect
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QPainter, QPen, QFont, QShortcut, QKeySequence
 from gui.theme import CYAN, GREEN, PINK, AMBER, BG, BG2, TEXT_DIM, BORDER, CYAN_DIM, CYAN_MID, mono, parse_color
-from gui.components import ContextPanel, GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow, HoloCalendarWidget, CircuitBoardBackground, CyberTerminal
+from gui.components import ContextPanel, GlowLabel, CyberPanel, StatBar, AudioMonitorWidget, SmallWaveformWidget, StateIndicator, StatusRing, ChatBubble, CyberButton, TelemetryBar, TelemetryMetric, PulsingDot, MatrixRain, ContextSaturationRing, AnimatedSidePane, AnimatedMapPane, MapToggleTab, DangerConfirmDialog, ToasterMessage, DailyBriefingPanel, HoloSearchWindow, HoloCalendarWidget, CircuitBoardBackground, CyberTerminal, AmbientDisplayWidget
 from gui.enrollment import VoiceEnrollmentDialog
 
 class GraceHUD(QMainWindow):
@@ -46,6 +46,7 @@ class GraceHUD(QMainWindow):
         self.bubble_count  = 0
         self.metrics_pane = None
         self._loading_history = False
+        self.is_ptt_active = False
         self.search_windows = [] # Keep references to prevent GC
 
         self.setStyleSheet(f"""
@@ -80,6 +81,7 @@ class GraceHUD(QMainWindow):
         """)
 
         self._build_ui()
+        self._setup_ambient_display()
         QShortcut(QKeySequence("Ctrl+Shift+L"), self).activated.connect(self._toggle_context_panel)
         self._connect_signals()
         self._start_timers()
@@ -480,17 +482,12 @@ class GraceHUD(QMainWindow):
         ac_lay.setSpacing(6)
         
         self.btn_sleep    = CyberButton("SLEEP", CYAN)
-        self.btn_train    = CyberButton("TRAIN VOICE", GREEN)
-        self.btn_env      = CyberButton("ENV: LOCAL", GREEN)
         self.btn_api_quota = CyberButton("API QUOTA", AMBER)
         self.btn_shutdown = CyberButton("SHUTDOWN", PINK)
         
         self.btn_api_quota.clicked.connect(self.api_pane.toggle)
-        self.btn_env.clicked.connect(self._prompt_env_toggle)
         
         ac_lay.addWidget(self.btn_sleep)
-        ac_lay.addWidget(self.btn_train)
-        ac_lay.addWidget(self.btn_env)
         ac_lay.addWidget(self.btn_api_quota)
         ac_lay.addWidget(self.btn_shutdown)
         lay.addWidget(actions)
@@ -558,7 +555,6 @@ class GraceHUD(QMainWindow):
         self.sig_terminal_log.connect(self._on_terminal_log)
         self.context_panel.sig_scene_done.connect(self._on_scene_done)
         self.btn_shutdown.clicked.connect(self.close)
-        self.btn_train.clicked.connect(self._open_enrollment)
         self.btn_sleep.clicked.connect(self.sig_force_sleep.emit)
         
     def _on_map_tab_clicked(self):
@@ -567,17 +563,6 @@ class GraceHUD(QMainWindow):
         else:
             self.map_tab.set_glow(False)
             self.map_pane.slide_in()
-
-    def _open_enrollment(self):
-        self.is_enrolling = True
-        dialog = VoiceEnrollmentDialog(self)
-        dialog.exec()
-        self.is_enrolling = False
-        
-        # Clear backlog audio to prevent accidental triggers from stale mic data
-        from core.audio import mic_queue
-        with mic_queue.mutex:
-            mic_queue.queue.clear()
 
     def _start_timers(self):
         self.timer_clock = QTimer()
@@ -809,7 +794,10 @@ class GraceHUD(QMainWindow):
 
     # ── THREAD-SAFE SETTERS ───────────────
     def set_state(self, state: str):
+        self.state = state
         self.sig_state.emit(state)
+        if state != "IDLE" and hasattr(self, 'reset_inactivity'):
+            self.reset_inactivity()
 
     def add_message(self, speaker: str, text: str, tools: list = None, animate: bool = True):
         self.sig_message.emit(speaker, text, tools or [], animate)
@@ -832,17 +820,6 @@ class GraceHUD(QMainWindow):
         dlg = DangerConfirmDialog("Are you sure you want to PERMANENTLY erase ALL long-term memories from Pinecone? This action CANNOT BE UNDONE.", self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.sig_clear_pinecone.emit()
-            
-    def _prompt_env_toggle(self):
-        if "LOCAL" in self.btn_env.text():
-            self.btn_env.setText("ENV: CLOUD")
-            self.btn_env.set_color(AMBER)
-            self.sig_env_toggle.emit("CLOUD")
-        else:
-            self.btn_env.setText("ENV: LOCAL")
-            self.btn_env.glow_color = GREEN
-            self.btn_env.update()
-            self.sig_env_toggle.emit("LOCAL")
 
     def _show_search_hologram(self, search_data):
         try:
@@ -942,6 +919,77 @@ class GraceHUD(QMainWindow):
                 and not self.context_panel_manual_override
                 and self.state in ["IDLE", "LISTENING"]):
             self._toggle_context_panel(is_auto=True)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_H and not event.isAutoRepeat():
+            from PyQt6.QtWidgets import QApplication, QLineEdit
+            if not isinstance(QApplication.focusWidget(), QLineEdit):
+                self.is_ptt_active = True
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_H and not event.isAutoRepeat():
+            self.is_ptt_active = False
+        super().keyReleaseEvent(event)
+
+    def _setup_ambient_display(self):
+        self.ambient_display = AmbientDisplayWidget(self.centralWidget())
+        self.ambient_display.hide()
+        
+        self.inactivity_timer = QTimer(self)
+        self.inactivity_timer.setInterval(30000) # 30s
+        self.inactivity_timer.timeout.connect(self._show_ambient_display)
+        self.inactivity_timer.start()
+        
+        self.ambient_opacity = QGraphicsOpacityEffect(self.ambient_display)
+        self.ambient_display.setGraphicsEffect(self.ambient_opacity)
+        self.ambient_anim = QPropertyAnimation(self.ambient_opacity, b"opacity")
+        self.ambient_anim.setDuration(1000)
+        
+        # Install event filter to track activity
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if event.type() in [QEvent.Type.KeyPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress, QEvent.Type.Wheel]:
+            self.reset_inactivity()
+        return super().eventFilter(obj, event)
+
+    def reset_inactivity(self):
+        if hasattr(self, 'ambient_display') and self.ambient_display.isVisible():
+            self._hide_ambient_display()
+        if hasattr(self, 'inactivity_timer'):
+            self.inactivity_timer.start(30000)
+
+    def _show_ambient_display(self):
+        if not self.ambient_display.isVisible():
+            try:
+                self.ambient_anim.finished.disconnect()
+            except Exception:
+                pass
+            self.ambient_display.setGeometry(self.centralWidget().rect())
+            self.ambient_display.show()
+            self.ambient_display.raise_()
+            self.ambient_anim.setStartValue(0.0)
+            self.ambient_anim.setEndValue(1.0)
+            self.ambient_anim.start()
+
+    def _hide_ambient_display(self):
+        if self.ambient_anim.state() == QPropertyAnimation.State.Running:
+            return
+        self.ambient_anim.setStartValue(1.0)
+        self.ambient_anim.setEndValue(0.0)
+        try:
+            self.ambient_anim.finished.disconnect()
+        except Exception:
+            pass
+        self.ambient_anim.finished.connect(self.ambient_display.hide)
+        self.ambient_anim.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'ambient_display') and self.ambient_display.isVisible():
+            self.ambient_display.setGeometry(self.centralWidget().rect())
 
 # ──────────────────────────────────────────
 # STANDALONE DEMO RUN

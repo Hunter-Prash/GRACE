@@ -121,6 +121,29 @@ If NO goals are stagnant (all updated within 30 days), output exactly the string
     }
 }
 
+async function generateDailyMotivation() {
+    console.log("[CRON] Generating Daily Motivation...");
+    
+    const activeGoals = await getActiveGoals();
+    const goalsContext = activeGoals && activeGoals.length > 0 ? JSON.stringify(activeGoals, null, 2) : "No specific active goals.";
+    
+    const aiClient = getAiClient();
+    const prompt = `You are Grace, an advanced personal AI assistant for Prashant. It is 7:00 AM in the morning.
+Prashant is working hard on his goals. Here is his current life situation/active goals:
+${goalsContext}
+
+Write a highly motivational, proactive morning message for Prashant to start his day. 
+Use your internal knowledge to make it deeply personal and motivating. Remind him of his true potential and his long term goals.
+Keep it concise, punchy, and formatted well for Discord. Do not use emojis unless absolutely necessary.`;
+
+    const response = await aiClient.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: prompt,
+    });
+
+    await logToDiscord(`🌅 **Daily Motivation:**\n\n${response.text}`, false);
+}
+
 export const handler = async (event) => {
     try {
         console.log("[CRON] Running Grace Proactive Cron Job (Dispatcher)...");
@@ -140,6 +163,11 @@ export const handler = async (event) => {
         // 3. 1st of every month at 9:00 AM IST: Stagnant Goal Detector
         if (istTime.getDate() === 1 && istTime.getHours() === 9) {
              await runStagnantGoalDetector();
+        }
+
+        // 4. Every day at 7:00 AM IST: Daily Motivation
+        if (istTime.getHours() === 7) {
+             await generateDailyMotivation();
         }
 
         return { statusCode: 200, body: 'Successfully ran cron dispatcher.' };

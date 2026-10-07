@@ -141,10 +141,11 @@ async def stream_synthesize_and_play(text: str, hud, text_input_queue=None, cmd_
                 speaker_queue.queue.clear()
             break
         try:
+            # Drain mic queue to prevent memory leak
             mic_data = mic_queue.get_nowait()
-            pcm = np.frombuffer(mic_data, dtype=np.int16)
-            vol = math.sqrt(sum(int(x)**2 for x in pcm) / max(len(pcm), 1))
-            if vol >= SILENCE_THRESHOLD + 150:
+            
+            # Allow Push-to-Talk (H key) to interrupt Grace's speech
+            if getattr(hud, "is_ptt_active", False):
                 interrupted[0] = True
                 with speaker_queue.mutex:
                     speaker_queue.queue.clear()
