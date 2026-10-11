@@ -3171,10 +3171,12 @@ class HoloCalendarWidget(QDialog):
         self._drag_pos = None
         event.accept()
 
-class AmbientDisplayWidget(QFrame):
+class AmbientDisplayWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("background-color: rgba(0, 0, 0, 230);")
         self.layout = QVBoxLayout(self)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.setSpacing(10)
@@ -3205,11 +3207,6 @@ class AmbientDisplayWidget(QFrame):
         self.layout.addStretch()
         
         self.update_time()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 215)) # 215/255 approx 85% opacity
-        super().paintEvent(event)
 
     def update_time(self):
         from datetime import datetime

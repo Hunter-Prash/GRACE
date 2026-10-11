@@ -28,33 +28,7 @@ export const BASE_TOOLS = [{
                 required: ["goalId", "milestoneKey", "isComplete"]
             }
         },
-        {
-            name: "updateDailyMetrics",
-            description: "Logs Prashant's daily habits, mood, energy, or focus. Call this whenever he mentions completing a habit or feeling a certain way.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    habits: { type: "ARRAY", items: { type: "STRING" }, description: "List of habits completed today" },
-                    mood_score: { type: "INTEGER", description: "Score from 1 to 10" },
-                    energy_lvl: { type: "INTEGER", description: "Score from 1 to 10" },
-                    core_focus: { type: "STRING" },
-                    audience_energy: { type: "STRING", description: "Energy of the audience, e.g. High, Medium, Low" },
-                    trigger: { type: "STRING", description: "The trigger or reason for the update" }
-                },
-                required: ["audience_energy", "trigger"]
-            }
-        },
-        {
-            name: "getAllDailyMetrics",
-            description: "Fetches historical daily metrics logs. If the user asks for a specific date range (e.g. 'June' or 'last week'), provide the start and end dates in YYYY-MM-DD format. If no range is specified, do not provide these parameters.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    start: { type: "STRING", description: "Start date in YYYY-MM-DD format (e.g., 2026-06-01)" },
-                    end: { type: "STRING", description: "End date in YYYY-MM-DD format (e.g., 2026-06-30)" }
-                }
-            }
-        },
+
         {
             name: "openResource",
             description: "Opens a desktop application or a specific website on the user's computer. Call this whenever the user asks to open an app (e.g. 'chrome', 'vscode', 'spotify') or a website (e.g. 'youtube', 'google'). If it is a website, you MUST pass a fully qualified https:// URL.",

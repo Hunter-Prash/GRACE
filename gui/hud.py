@@ -937,7 +937,7 @@ class GraceHUD(QMainWindow):
         self.ambient_display.hide()
         
         self.inactivity_timer = QTimer(self)
-        self.inactivity_timer.setInterval(30000) # 30s
+        self.inactivity_timer.setInterval(600000) # 10m
         self.inactivity_timer.timeout.connect(self._show_ambient_display)
         self.inactivity_timer.start()
         
@@ -959,7 +959,7 @@ class GraceHUD(QMainWindow):
         if hasattr(self, 'ambient_display') and self.ambient_display.isVisible():
             self._hide_ambient_display()
         if hasattr(self, 'inactivity_timer'):
-            self.inactivity_timer.start(30000)
+            self.inactivity_timer.start(600000)
 
     def _show_ambient_display(self):
         if not self.ambient_display.isVisible():

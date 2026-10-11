@@ -63,9 +63,9 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: GraceChatSessions
         - DynamoDBCrudPolicy:
-            TableName: GraceGoals
+            TableName: Grace_Goals
         - DynamoDBCrudPolicy:
-            TableName: GraceMetrics
+            TableName: Grace_Workouts
         - DynamoDBCrudPolicy:
             TableName: Expense-Tracker-Transactions-Table
         - EventBridgePutEventsPolicy:

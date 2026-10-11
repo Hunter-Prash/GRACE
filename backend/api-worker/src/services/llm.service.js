@@ -2,7 +2,6 @@ import { GoogleGenAI } from '@google/genai';
 import { getGeminiKey } from '../config.js';
 import { loadChatHistory } from './chat.service.js';
 import { createGoal, updateMilestone, getActiveGoals, getAllGoals, getGoalMilestones, deleteGoalOrMilestone, updateGoalStatus } from './goals.service.js';
-import { updateDailyMetrics, getAllDailyMetrics } from './metrics.service.js';
 import { openApplications } from './osManager.service.js';
 import { getEmbedding } from './rag.service.js';
 import { logToDiscord } from './logger.service.js';
@@ -216,7 +215,7 @@ Whenever asked to perform any hard facts lookup, database query, calendar lookup
 
 Gemini does the thinking: It reads your prompt, figures out which function to call, extracts the right parameters from your conversation, and returns a JSON data structure requesting the execution.
 
-You do the doing: Your local JavaScript code intercepts that JSON request, physically runs the matching local function (like updateDailyMetrics()), and handles the real-world database side of things.
+You do the doing: Your local JavaScript code intercepts that JSON request, physically runs the matching local function (like logWorkoutSet()), and handles the real-world database side of things.
 
 Gemini never executes your code directly. It doesn't have access to your server, your local database, or your file system.
 */
@@ -231,15 +230,6 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const args = call.args;
                     await updateMilestone(args.goalId, args.milestoneKey, args.isComplete);
                     toolResult = { success: true, message: `Milestone ${args.milestoneKey} updated.` };
-                }
-                else if (call.name === "updateDailyMetrics") {
-                    const args = call.args;
-                    await updateDailyMetrics(args.habits, args.mood_score, args.energy_lvl, args.core_focus, args.audience_energy, args.trigger);//audience energy is a mandatory param without it the fnc should not execute its logic
-                    toolResult = { success: true, message: `Daily metrics updated.` };
-                }
-                else if (call.name === "getAllDailyMetrics") {
-                    const metrics = await getAllDailyMetrics(call.args.start, call.args.end);
-                    toolResult = { success: true, dailyMetrics: metrics };
                 }
                 else if (call.name === 'openResource') {
                     const args = call.args;

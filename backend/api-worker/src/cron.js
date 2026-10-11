@@ -1,5 +1,5 @@
 import { getCalendarEvents } from './services/calendar.service.js';
-import { getActiveGoals } from './services/goals.service.js';
+import { getActiveGoals, getAllGoals } from './services/goals.service.js';
 import { logToDiscord } from './services/logger.service.js';
 import { getGeminiKey } from './config.js';
 import { GoogleGenAI } from '@google/genai';
@@ -54,7 +54,7 @@ Generate a very short, friendly, proactive heads-up message for Prashant. Be hel
 Keep it under 3 sentences. Output ONLY the message you want to send him. Do not use emojis unless absolutely necessary.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
     });
 
@@ -84,41 +84,39 @@ Remind him of his ultimate goal of transitioning into Big Tech.
 Keep it concise, punchy, and formatted well for Discord. Do not use emojis unless absolutely necessary.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
     });
 
     await logToDiscord(`📅 **Sunday Weekly Strategy Briefing:**\n\n${response.text}`, false);
 }
 
-async function runStagnantGoalDetector() {
-    console.log("[CRON] Running Stagnant Goal Detector...");
+async function runGoalAnalyzer() {
+    console.log("[CRON] Running Weekly Goal Analyzer...");
     
-    const activeGoals = await getActiveGoals();
+    const allGoals = await getAllGoals();
     
-    if (!activeGoals || activeGoals.length === 0) {
+    if (!allGoals || allGoals.length === 0) {
+        console.log("[CRON] No goals found to analyze.");
         return;
     }
     
     const aiClient = getAiClient();
     const prompt = `You are Grace, an advanced personal AI assistant. 
-Here are Prashant's currently active goals and their 'LastUpdated' timestamps:
-${JSON.stringify(activeGoals, null, 2)}
+Here are all of Prashant's goals (completed, active, in-progress, etc.):
+${JSON.stringify(allGoals, null, 2)}
 
 Today's date is: ${new Date().toISOString()}
 
-Analyze the goals. If any goal hasn't been updated in over 30 days, generate a gentle but firm message for Prashant calling him out on those specific stagnant goals. Ask him if he wants to pause them, delete them, or break them down.
-If NO goals are stagnant (all updated within 30 days), output exactly the string: NO_STAGNANT_GOALS`;
+Perform a deep, highly analytical review of everything he has accomplished so far and what is currently pending. Point out patterns, acknowledge significant completions, and highlight any potential bottlenecks in his incompleted tasks. 
+Draft a comprehensive, motivating, and strategic message analyzing his overall progress. Format it well for Discord without using unnecessary emojis.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
     });
 
-    const text = response.text.trim();
-    if (text !== "NO_STAGNANT_GOALS") {
-        await logToDiscord(`⚠️ **Stagnant Goal Alert:**\n\n${text}`, false);
-    }
+    await logToDiscord(`📊 **Saturday Goal Analysis:**\n\n${response.text}`, false);
 }
 
 async function generateDailyMotivation() {
@@ -137,7 +135,7 @@ Use your internal knowledge to make it deeply personal and motivating. Remind hi
 Keep it concise, punchy, and formatted well for Discord. Do not use emojis unless absolutely necessary.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
     });
 
@@ -156,17 +154,17 @@ export const handler = async (event) => {
 
         // 2. Sundays at 6:00 PM IST: Run Weekly Strategy
         // getDay() 0 = Sunday, getHours() 18 = 6 PM
-        if (istTime.getDay() === 0 && istTime.getHours() === 18) {
+        if (istTime.getUTCDay() === 0 && istTime.getUTCHours() === 18) {
             await runWeeklyStrategy();
         }
 
-        // 3. 1st of every month at 9:00 AM IST: Stagnant Goal Detector
-        if (istTime.getDate() === 1 && istTime.getHours() === 9) {
-             await runStagnantGoalDetector();
+        // 3. Every Saturday at 12:00 PM IST: Goal Analyzer
+        if (istTime.getUTCDay() === 6 && istTime.getUTCHours() === 12) {
+             await runGoalAnalyzer();
         }
 
         // 4. Every day at 7:00 AM IST: Daily Motivation
-        if (istTime.getHours() === 7) {
+        if (istTime.getUTCHours() === 7) {
              await generateDailyMotivation();
         }
 
