@@ -1,5 +1,6 @@
 import { getCalendarEvents } from './services/calendar.service.js';
 import { getActiveGoals, getAllGoals } from './services/goals.service.js';
+import { getDueBrainDumps, getBrainDumpNotes } from './services/braindump.service.js';
 import { logToDiscord } from './services/logger.service.js';
 import { getGeminiKey } from './config.js';
 import { GoogleGenAI } from '@google/genai';
@@ -119,51 +120,101 @@ Draft a comprehensive, motivating, and strategic message analyzing his overall p
     await logToDiscord(`📊 **Saturday Goal Analysis:**\n\n${response.text}`, false);
 }
 
-async function generateDailyMotivation() {
-    console.log("[CRON] Generating Daily Motivation...");
-    
-    const activeGoals = await getActiveGoals();
-    const goalsContext = activeGoals && activeGoals.length > 0 ? JSON.stringify(activeGoals, null, 2) : "No specific active goals.";
-    
-    const aiClient = getAiClient();
-    const prompt = `You are Grace, an advanced personal AI assistant for Prashant. It is 7:00 AM in the morning.
-Prashant is working hard on his goals. Here is his current life situation/active goals:
-${goalsContext}
+async function runDailyBrainDumpReview() {
+    console.log("[CRON] Running 24-Hour Daily Brain Dump Review (9:00 PM IST)...");
+    const activeNotes = await getBrainDumpNotes("Active", null, 20);
+    const dueNotes = await getDueBrainDumps();
 
-Write a highly motivational, proactive morning message for Prashant to start his day. 
-Use your internal knowledge to make it deeply personal and motivating. Remind him of his true potential and his long term goals.
-Keep it concise, punchy, and formatted well for Discord. Do not use emojis unless absolutely necessary.`;
+    if (activeNotes.length === 0) {
+        console.log("[CRON] No active Brain Dump notes found for daily review.");
+        return;
+    }
+
+    console.log(`[CRON] Reviewing ${activeNotes.length} active Brain Dump notes (${dueNotes.length} due today/upcoming)...`);
+    const aiClient = getAiClient();
+    const prompt = `You are Grace, an advanced personal AI assistant and Life Support System for Prashant. 
+It is 9:00 PM IST—time for his end-of-day Brain Dump review and mental wind-down.
+
+Here are his current active notes, reminders, and thoughts recorded in his database:
+${JSON.stringify(activeNotes.map(n => ({ content: n.Content, category: n.Category, dueDate: n.DueDate || "No deadline" })), null, 2)}
+
+Tasks/Reminders specifically due today or upcoming:
+${JSON.stringify(dueNotes.map(n => ({ content: n.Content, dueDate: n.DueDate })), null, 2)}
+
+Write a concise, warm, and structured evening debrief for Prashant:
+1. Briefly acknowledge what was noted down today / pending.
+2. Flag anything urgent or due tomorrow/soon so he doesn't have it lingering in his head.
+3. Keep it calming, encouraging, and under 4-5 bullet points formatted cleanly for Discord. Do not use unnecessary emojis.`;
 
     const response = await aiClient.models.generateContent({
         model: 'gemini-3.1-flash-lite',
         contents: prompt,
     });
 
-    await logToDiscord(`🌅 **Daily Motivation:**\n\n${response.text}`, false);
+    await logToDiscord(`🧠 **Daily Brain Dump & Evening Wind-Down:**\n\n${response.text}`, false);
 }
 
-export const handler = async (event) => {
+async function generateDailyMotivation() {
+    console.log("[CRON] Generating Daily Morning Perspective (7:00 AM IST)...");
+    
+    const aiClient = getAiClient();
+    const prompt = `You are Grace, an insightful, grounded personal companion for Prashant. 
+It is 7:00 AM in the morning.
+
+Provide a genuinely thoughtful, powerful piece of motivational advice or philosophical perspective for him to start his day. 
+Guidelines:
+- Do NOT reference any goals, databases, milestones, work projects, or to-do lists.
+- Focus strictly on mindset, discipline, mental clarity, resilience, or presence.
+- Be authentic, grounded, and human—speak like a wise, trusted mentor or friend, not a cheerleader with hollow clichés.
+- Keep it concise (2-3 sentences max). Formatted cleanly for Discord without unnecessary emojis.`;
+
+    const response = await aiClient.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: prompt,
+    });
+
+    await logToDiscord(`🌅 **Daily Morning Perspective:**\n\n${response.text}`, false);
+}
+
+export const handler = async (event = {}) => {
     try {
-        console.log("[CRON] Running Grace Proactive Cron Job (Dispatcher)...");
+        console.log("[CRON] Running Grace Proactive Cron Job (Dispatcher)...", JSON.stringify(event));
         
         const now = new Date(); // Current time in UTC
         const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // Get current time in IST
         
-        // 1. Every 1 Hour: Check for upcoming calendar events
+        // Manual override check (for instant test triggers via EventBridge or manual invocation)
+        if (event.action === 'triggerBrainDump' || event.forceBrainDump === true) {
+            console.log("[CRON] Manual Brain Dump trigger received!");
+            await runDailyBrainDumpReview();
+            return { statusCode: 200, body: 'Successfully executed manual Brain Dump trigger.' };
+        }
+        if (event.action === 'triggerMotivation' || event.forceMotivation === true) {
+            console.log("[CRON] Manual Motivation trigger received!");
+            await generateDailyMotivation();
+            return { statusCode: 200, body: 'Successfully executed manual Motivation trigger.' };
+        }
+
+        // 1. Every 1 Hour: Check for upcoming calendar events only
         await checkUpcomingEvents(now);
 
-        // 2. Sundays at 6:00 PM IST: Run Weekly Strategy
+        // 2. Once every 24 Hours at 9:00 PM IST (21:00): Daily Brain Dump Review
+        if (istTime.getUTCHours() === 21) {
+            await runDailyBrainDumpReview();
+        }
+
+        // 3. Sundays at 6:00 PM IST: Run Weekly Strategy
         // getDay() 0 = Sunday, getHours() 18 = 6 PM
         if (istTime.getUTCDay() === 0 && istTime.getUTCHours() === 18) {
             await runWeeklyStrategy();
         }
 
-        // 3. Every Saturday at 12:00 PM IST: Goal Analyzer
+        // 4. Every Saturday at 12:00 PM IST: Goal Analyzer
         if (istTime.getUTCDay() === 6 && istTime.getUTCHours() === 12) {
              await runGoalAnalyzer();
         }
 
-        // 4. Every day at 7:00 AM IST: Daily Motivation
+        // 5. Every day at 7:00 AM IST: Daily Motivation
         if (istTime.getUTCHours() === 7) {
              await generateDailyMotivation();
         }

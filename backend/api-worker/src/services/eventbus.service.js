@@ -37,3 +37,29 @@ export const triggerIndexerEvent = async (sessionId, unindexedCount) => {
         return false;
     }
 };
+
+export const triggerBrainDumpEvent = async () => {
+    try {
+        const eventBusName = process.env.AWS_EVENT_BUS_NAME || "grace-ai-bus";
+        const params = {
+            Entries: [
+                {
+                    Source: "grace.braindump.service",
+                    DetailType: "DailyBrainDumpReview",
+                    Detail: JSON.stringify({
+                        action: "triggerBrainDump",
+                        timestamp: getISTTimestamp()
+                    }),
+                    EventBusName: eventBusName
+                }
+            ]
+        };
+        const command = new PutEventsCommand(params);
+        await client.send(command);
+        console.log(`[EventBridge] Published DailyBrainDumpReview event to ${eventBusName}`);
+        return true;
+    } catch (e) {
+        console.error("[EventBridge] Failed to publish Brain Dump event:", e.message);
+        return false;
+    }
+};
