@@ -10,6 +10,8 @@ import { getCurrentDateTime } from './datetime.service.js';
 import { getCalendarEvents, scheduleEvent, rescheduleEvent, cancelEvent } from './calendar.service.js';
 import { getTransactions, addTransaction } from './finance.service.js';
 import { logWorkoutSet, getTodaysWorkout, getExerciseHistory } from './workout.service.js';
+import { saveBrainDump, getBrainDumpNotes, updateBrainDumpStatus } from './braindump.service.js';
+import { getMealContext } from './nutrition.service.js';
 import { BASE_TOOLS } from './tools.config.js';
 import { performFullHealthCheck } from '../middleware/healthCheck.js';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -330,6 +332,25 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 else if (call.name === 'getExerciseHistory') {
                     const res = await getExerciseHistory(call.args.exerciseName);
                     toolResult = { success: true, ...res };
+                }
+                else if (call.name === 'captureBrainDump') {
+                    const args = call.args;
+                    const res = await saveBrainDump(args.content, args.category, args.dueDate, args.tags);
+                    toolResult = { success: true, message: `Saved note under ${args.category}: "${args.content}"`, note: res.note };
+                }
+                else if (call.name === 'getBrainDumpNotes') {
+                    const args = call.args;
+                    const notes = await getBrainDumpNotes(args.status || 'Active', args.category);
+                    toolResult = { success: true, count: notes.length, notes: notes };
+                }
+                else if (call.name === 'completeBrainDump') {
+                    const args = call.args;
+                    await updateBrainDumpStatus(args.createdAt, args.status || 'Completed');
+                    toolResult = { success: true, message: `Marked note as ${args.status || 'Completed'}.` };
+                }
+                else if (call.name === 'recommendMeal') {
+                    const mealContext = await getMealContext();
+                    toolResult = { success: true, context: mealContext, userRequest: call.args };
                 }
                 else {
                     // Assume it's an MCP tool if it's not a hardcoded local tool

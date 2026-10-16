@@ -231,6 +231,65 @@ export const BASE_TOOLS = [{
                 },
                 required: ["exerciseName"]
             }
+        },
+        {
+            name: "captureBrainDump",
+            description: "Saves a quick thought, note, reminder, idea, or personal detail for Prashant. Call this whenever he asks to remember, note down, save a thought, or record where he placed an item.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    content: { type: "STRING", description: "The exact thought, note, reminder, or item location to record." },
+                    category: { 
+                        type: "STRING", 
+                        enum: ["Reminder", "Personal", "Family", "Idea", "Item_Location", "Admin"],
+                        description: "The auto-detected category for the thought."
+                    },
+                    dueDate: { type: "STRING", description: "Optional date or day if a deadline or reminder date was mentioned (e.g. '2026-10-20' or 'Tuesday')" },
+                    tags: { 
+                        type: "ARRAY", 
+                        items: { type: "STRING" },
+                        description: "Optional array of 1-3 keywords/tags to categorize the note." 
+                    }
+                },
+                required: ["content", "category"]
+            }
+        },
+        {
+            name: "getBrainDumpNotes",
+            description: "Fetches Prashant's saved thoughts, notes, or reminders. Use when he asks 'what did I note down', 'what are my reminders', 'what did Mom ask for', or 'where did I put X'.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    category: { type: "STRING", description: "Optional category filter: Reminder, Personal, Family, Idea, Item_Location, Admin" },
+                    status: { type: "STRING", description: "Status filter: Active (default), Completed, or Archived" }
+                }
+            }
+        },
+        {
+            name: "completeBrainDump",
+            description: "Marks a specific brain dump thought or reminder as Completed or Archived once done.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    createdAt: { type: "STRING", description: "The exact CreatedAt timestamp of the note to complete." },
+                    status: { type: "STRING", enum: ["Completed", "Archived"], description: "New status" }
+                },
+                required: ["createdAt"]
+            }
+        },
+        {
+            name: "recommendMeal",
+            description: "Fetches live lifestyle context (today's workout, nutrition guidance, location in Siruseri) so you can formulate an intelligent, tailored meal recommendation for Prashant. Apply your own intelligence—recommend creative, practical meal ideas based on whatever ingredients he has, his budget, whether he wants to cook or order, and his protein needs.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    mealType: { type: "STRING", enum: ["Breakfast", "Lunch", "Dinner", "Snack"], description: "Which meal of the day" },
+                    pantryIngredients: { type: "ARRAY", items: { type: "STRING" }, description: "Ingredients available on hand" },
+                    budgetRupees: { type: "NUMBER", description: "Max budget in INR if ordering" },
+                    preference: { type: "STRING", enum: ["Cook", "Order", "Any"], description: "Whether to cook or order" }
+                },
+                required: ["mealType"]
+            }
         }
     ]
 }];

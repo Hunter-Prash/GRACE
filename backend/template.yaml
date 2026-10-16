@@ -6,7 +6,7 @@ Description: >
 Globals:
   Function:
     Timeout: 30
-    Runtime: nodejs20.x
+    Runtime: nodejs22.x
     Architectures:
       - x86_64
     Environment:
@@ -68,6 +68,8 @@ Resources:
             TableName: Grace_Workouts
         - DynamoDBCrudPolicy:
             TableName: Expense-Tracker-Transactions-Table
+        - DynamoDBCrudPolicy:
+            TableName: Grace_BrainDump
         - EventBridgePutEventsPolicy:
             EventBusName: grace-ai-bus
       Events:
@@ -114,6 +116,11 @@ Resources:
       Handler: src/cron.handler
       MemorySize: 256
       Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: Grace_Goals
+        - DynamoDBCrudPolicy:
+            TableName: Grace_BrainDump
       Events:
         ScheduleEvent:
           Type: Schedule
