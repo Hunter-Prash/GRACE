@@ -59,10 +59,14 @@ export default function App() {
             }
 
             setInput("")
-            setLoading(false)
-
         } catch (error) {
-            console.log(error)
+            console.error("Chat error:", error)
+            setMessages((prev) => [...prev, {
+                role: 'model',
+                parts: [{ text: "Error: Unable to get a response from Grace. Please try again." }]
+            }]);
+        } finally {
+            setLoading(false)
         }
 
     }

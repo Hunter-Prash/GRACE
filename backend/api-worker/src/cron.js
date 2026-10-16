@@ -164,8 +164,6 @@ It is 7:00 AM in the morning.
 Provide a genuinely thoughtful, powerful piece of motivational advice or philosophical perspective for him to start his day. 
 Guidelines:
 - Do NOT reference any goals, databases, milestones, work projects, or to-do lists.
-- Focus strictly on mindset, discipline, mental clarity, resilience, or presence.
-- Be authentic, grounded, and human—speak like a wise, trusted mentor or friend, not a cheerleader with hollow clichés.
 - Keep it concise (2-3 sentences max). Formatted cleanly for Discord without unnecessary emojis.`;
 
     const response = await aiClient.models.generateContent({
