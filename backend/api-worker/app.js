@@ -18,8 +18,8 @@ app.use('/api', healthCheckMiddleware);
 // Mount routers
 app.use('/api/auth', authRoutes);
 
-// Protect the following routes
-app.use('/api', verifyToken, chatRoutes);
+// Chat routes (unauthenticated for direct web portal access)
+app.use('/api', chatRoutes);
 app.use('/api/goals', verifyToken, goalsRoutes);
 app.use('/api/rag', verifyToken, ragRoutes);
 
