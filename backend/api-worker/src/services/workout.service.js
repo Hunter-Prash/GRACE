@@ -1,44 +1,5 @@
 import { UpdateCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from './db.client.js';
-import stringSimilarity from 'string-similarity';
-
-// List of standard exercises for fuzzy matching
-const KNOWN_EXERCISES = [
-    "squat",
-    "bench-press",
-    "barbell-row",
-    "pull-up",
-    "assisted-pull-up",
-    "overhead-press",
-    "romanian-deadlift",
-    "plank",
-    "hanging-leg-raise",
-    "deadlift",
-    "incline-bench-press",
-    "lat-pulldown",
-    "chin-up",
-    "leg-press",
-    "bulgarian-split-squat",
-    "shoulder-press",
-    "lateral-raise",
-    "cable-crunch",
-    "ab-wheel",
-    "bicep-curl",
-    "barbell-curl",
-    "dumbbell-curl",
-    "cable-curl",
-    "hammer-curl",
-    "tricep-extension",
-    "tricep-pushdown",
-    "push-up",
-    "dumbbell-row",
-    "chest-supported-row",
-    "seated-cable-row",
-    "face-pull",
-    "leg-curl",
-    "leg-extension",
-    "calf-raise"
-];
 
 // Helper: Get IST Date String (YYYY-MM-DD), with support for relative words and past dates
 export function getISTDateString(dateInput) {
@@ -93,21 +54,9 @@ export function getISTDateString(dateInput) {
     return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
 }
 
-// Helper: Normalize exercise name using fuzzy matching
+// Helper: Normalize exercise name (lowercase, replace spaces/special chars with hyphens)
 function normalizeExercise(rawName) {
-    // 1. Basic cleaning (lowercase, replace spaces/special chars with hyphens)
-    const cleaned = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-
-    // 2. Fuzzy match against known exercises
-    const matches = stringSimilarity.findBestMatch(cleaned, KNOWN_EXERCISES);
-
-    // If the best match is >= 60% similar, use the standard name
-    if (matches.bestMatch.rating >= 0.6) {
-        return matches.bestMatch.target;
-    }
-
-    // Fallback: If it's a completely new exercise, just return the cleaned version
-    return cleaned;
+    return rawName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
 /**
