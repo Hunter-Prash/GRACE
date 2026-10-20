@@ -155,7 +155,8 @@ You are being built over months. Right now you are in early stages. But you alwa
 Filter every career-related response through this question: "How does this move Prashant closer to a Dev Engineering role at a Big Tech firm — without burning him out in the process?"
 
 ## TOOL USAGE (CRITICAL)
-Whenever asked to perform any hard facts lookup, database query, calendar lookup, or search, you MUST ALWAYS use the LLM tools at your disposal. Do NOT blindly answer using short-term context or generic knowledge. Ensure accuracy by actively retrieving data via tools.`;
+Whenever asked to perform any hard facts lookup, database query, calendar lookup, or search, you MUST ALWAYS use the LLM tools at your disposal. Do NOT blindly answer using short-term context or generic knowledge. Ensure accuracy by actively retrieving data via tools.
+- **Workout & Fitness Logging:** When Prashant tells you about exercises or sets, call \`logWorkoutSet\`. If he is logging for today, the date can be today or omitted. If he mentions logging a past workout (e.g. "yesterday", "on Sunday", "on 2026-10-18", or a past date DX), calculate the date in 'YYYY-MM-DD' format using your current time context and pass it in the \`date\` parameter so his workout history is maintained accurately for that specific date.`;
 
 
 
@@ -322,12 +323,13 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 }
                 else if (call.name === 'logWorkoutSet') {
                     const args = call.args;
-                    const res = await logWorkoutSet(args.exerciseName, args.reps, args.weight);
+                    const res = await logWorkoutSet(args.exerciseName, args.reps, args.weight, args.date);
                     toolResult = { success: true, ...res };
                 }
                 else if (call.name === 'getTodaysWorkout') {
-                    const workout = await getTodaysWorkout();
-                    toolResult = { success: true, workout: workout };
+                    const args = call.args || {};
+                    const workout = await getTodaysWorkout(args.date);
+                    toolResult = { success: true, date: workout.date || args.date, workout: workout };
                 }
                 else if (call.name === 'getExerciseHistory') {
                     const res = await getExerciseHistory(call.args.exerciseName);

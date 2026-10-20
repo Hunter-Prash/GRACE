@@ -202,23 +202,26 @@ export const BASE_TOOLS = [{
         },
         {
             name: "logWorkoutSet",
-            description: "Logs a new set for an exercise. The exerciseName parameter must be normalized to lowercase with hyphens (e.g., 'bench-press'). If the user makes a spelling mistake (e.g., 'bnch press'), use your intelligence to autocorrect it to the standard fitness term before calling this tool.",
+            description: "Logs a new set for an exercise. The exerciseName parameter must be normalized to lowercase with hyphens (e.g., 'bench-press'). If the user makes a spelling mistake (e.g., 'bnch press'), use your intelligence to autocorrect it to the standard fitness term before calling this tool. If the user specifies that the workout was done on a past date or day (e.g., 'yesterday', 'on Sunday', 'on 2026-10-18', or date DX), calculate that date in 'YYYY-MM-DD' format using the current date/time context and pass it in the 'date' field. If logging for today or unspecified, omit the date field or pass today's date.",
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    exerciseName: { type: "STRING" },
-                    reps: { type: "INTEGER" },
-                    weight: { type: "NUMBER" }
+                    exerciseName: { type: "STRING", description: "The normalized exercise name (e.g. 'bench-press', 'squat', 'overhead-press')." },
+                    reps: { type: "INTEGER", description: "Number of repetitions performed in this set." },
+                    weight: { type: "NUMBER", description: "Weight used in kg." },
+                    date: { type: "STRING", description: "Optional date of the workout in 'YYYY-MM-DD' format. If logging a workout from yesterday or a past date, provide the target date in YYYY-MM-DD. Defaults to current IST date if omitted." }
                 },
                 required: ["exerciseName", "reps", "weight"]
             }
         },
         {
             name: "getTodaysWorkout",
-            description: "Fetches all of the user's exercises and sets recorded for the current day. Use this when the user asks what they did today or to summarize their current workout.",
+            description: "Fetches all of the user's exercises and sets recorded for a given day (defaults to today in IST). Use this when the user asks what they did today, yesterday, or on a specific date, or asks to review/summarize a workout session.",
             parameters: {
                 type: "OBJECT",
-                properties: {}
+                properties: {
+                    date: { type: "STRING", description: "Optional date in 'YYYY-MM-DD' format. If the user asks what workout they did yesterday or on a specific past date, provide that date. Defaults to current IST date if omitted." }
+                }
             }
         },
         {

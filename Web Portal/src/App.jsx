@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import Chatlog from './Components/Chatlog';
 import InputBox from './Components/InputBox';
 import HeaderOrb from './Components/HeaderOrb';
-import { cleanSpeechText, selectGraceVoice } from './utils/speech';
+import { speakGrace, stopGraceSpeech } from './utils/speech';
 
 const API_BASE_URL = "https://y32tddvhc0.execute-api.ap-south-1.amazonaws.com/Prod";
 
@@ -16,75 +16,52 @@ export default function App() {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
-    const [voiceEnabled, setVoiceEnabled] = useState(true);
+    const [speakingText, setSpeakingText] = useState(null);
     const bottomRef = useRef(null);
-    const voicesRef = useRef([]);
 
     // Get active authorization token (stored or default)
     const token = localStorage.getItem('grace_token') || DEFAULT_AUTH_TOKEN;
 
-    // Load and cache voices when browser has them ready
+    // Pre-warm browser speech synthesis voices
     useEffect(() => {
-        const loadVoices = () => {
-            if ('speechSynthesis' in window) {
-                const list = window.speechSynthesis.getVoices();
-                if (list && list.length > 0) {
-                    voicesRef.current = list;
-                }
-            }
-        };
-
-        loadVoices();
         if ('speechSynthesis' in window) {
-            window.speechSynthesis.onvoiceschanged = loadVoices;
+            window.speechSynthesis.getVoices();
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.getVoices();
+            };
         }
-
         return () => {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-            }
+            stopGraceSpeech();
         };
     }, []);
 
-    // Stop ongoing speech immediately
+    // Stop speaking immediately
     const stopSpeaking = useCallback(() => {
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-        }
+        stopGraceSpeech();
         setIsSpeaking(false);
+        setSpeakingText(null);
     }, []);
 
-    // Speak text with high quality natural voice and fast conversational rate
-    const speakText = useCallback((rawText) => {
-        if (!voiceEnabled || !('speechSynthesis' in window) || !rawText) return;
-
-        // Strip markdown, URLs, code blocks, and emojis before speaking
-        const speechText = cleanSpeechText(rawText);
-        if (!speechText) return;
-
-        // Cancel any pending speech first
-        window.speechSynthesis.cancel();
-
-        const utterance = new SpeechSynthesisUtterance(speechText);
-        
-        // Pick best available natural female voice
-        const bestVoice = selectGraceVoice(voicesRef.current.length > 0 ? voicesRef.current : window.speechSynthesis.getVoices());
-        if (bestVoice) {
-            utterance.voice = bestVoice;
+    // Play/Stop a specific message
+    const handleSpeakMessage = useCallback((text) => {
+        if (speakingText === text) {
+            stopSpeaking();
+            return;
         }
 
-        // Fast, natural conversational pace (no slow dragging or squeaky pitch)
-        utterance.rate = 1.18;
-        utterance.pitch = 1.0;
+        stopSpeaking();
+        setSpeakingText(text);
+        speakGrace(
+            text,
+            () => setIsSpeaking(true),
+            () => {
+                setIsSpeaking(false);
+                setSpeakingText(null);
+            }
+        );
+    }, [speakingText, stopSpeaking]);
 
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => setIsSpeaking(false);
-        utterance.onerror = () => setIsSpeaking(false);
-
-        window.speechSynthesis.speak(utterance);
-    }, [voiceEnabled]);
-
-    // Fetch chat history on initial mount (no authentication screen)
+    // Fetch initial chat history
     useEffect(() => {
         const fetchChat = async () => {
             try {
@@ -92,7 +69,12 @@ export default function App() {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (response.data && Array.isArray(response.data.history)) {
-                    setMessages(response.data.history);
+                    const now = Date.now();
+                    const history = response.data.history.map((item, idx) => ({
+                        ...item,
+                        time: item.time || new Date(now - (response.data.history.length - 1 - idx) * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    }));
+                    setMessages(history);
                 }
             } catch (e) {
                 console.warn("Could not load initial chat history:", e.message);
@@ -112,18 +94,19 @@ export default function App() {
         const textToSend = input.trim();
         if (!textToSend) return;
 
-        // 1. Immediately cut off any ongoing speech (Tony Stark interrupting Jarvis)
+        const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        // 1. Immediately cut off any voice playback
         stopSpeaking();
 
-        // 2. CRITICAL FIX: Clear the input field immediately!
-        // This ensures if user starts typing Message B while Message A is loading,
-        // Message B is preserved and NEVER wiped when response arrives.
+        // 2. CRITICAL FIX: Clear input immediately so user can type next message without it getting wiped
         setInput("");
 
         // 3. Optimistically render user message
         setMessages((prev) => [...prev, {
             role: 'user',
-            parts: [{ text: textToSend }]
+            parts: [{ text: textToSend }],
+            time: currentTime
         }]);
 
         setLoading(true);
@@ -136,20 +119,24 @@ export default function App() {
             );
 
             const aiText = response.data?.text || "No response received.";
+            const responseTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             setMessages((prev) => [...prev, {
                 role: 'model',
-                parts: [{ text: aiText }]
+                parts: [{ text: aiText }],
+                time: responseTime
             }]);
 
-            // Speak response with snappy natural voice
-            speakText(aiText);
+            // Automatically speak response at fast, crisp speed
+            handleSpeakMessage(aiText);
 
         } catch (error) {
             console.error("Chat error:", error);
             const errorMsg = error.response?.data?.details || error.response?.data?.error || "I ran into a connection issue. Please try again.";
+            const errTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             setMessages((prev) => [...prev, {
                 role: 'model',
-                parts: [{ text: typeof errorMsg === 'string' ? errorMsg : "Connection error. Please try again." }]
+                parts: [{ text: typeof errorMsg === 'string' ? errorMsg : "Connection error. Please try again." }],
+                time: errTime
             }]);
         } finally {
             setLoading(false);
@@ -164,11 +151,14 @@ export default function App() {
             <HeaderOrb 
                 isSpeaking={isSpeaking}
                 stopSpeaking={stopSpeaking}
-                voiceEnabled={voiceEnabled}
-                setVoiceEnabled={setVoiceEnabled}
             />
 
-            <Chatlog messages={messages} bottomRef={bottomRef} />
+            <Chatlog 
+                messages={messages} 
+                bottomRef={bottomRef}
+                onSpeakMessage={handleSpeakMessage}
+                speakingText={speakingText}
+            />
 
             {loading && (
                 <div className="flex justify-center items-center py-2 z-10 shrink-0">

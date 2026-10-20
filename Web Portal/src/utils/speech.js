@@ -7,7 +7,7 @@ export function cleanSpeechText(text) {
         // Remove code blocks
         .replace(/```[\s\S]*?```/g, "Code block omitted.")
         .replace(/`([^`]+)`/g, "$1")
-        // Remove markdown formatting
+        // Remove bold, italic, headers
         .replace(/\*\*([^*]+)\*\*/g, "$1")
         .replace(/\*([^*]+)\*/g, "$1")
         .replace(/__([^_]+)__/g, "$1")
@@ -17,7 +17,7 @@ export function cleanSpeechText(text) {
         .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
         // Remove raw URLs
         .replace(/https?:\/\/\S+/g, "")
-        // Remove bullet points and number lists
+        // Remove bullet markers and list numbers
         .replace(/^\s*[-*+]\s+/gm, "")
         .replace(/^\s*\d+\.\s+/gm, "")
         // Remove emojis and miscellaneous symbols
@@ -29,21 +29,22 @@ export function cleanSpeechText(text) {
 }
 
 /**
- * Prioritizes high-quality natural female voices across browsers (Edge, Chrome, Safari, etc.)
+ * Select the best quality natural English female voice available in the browser.
  */
 export function selectGraceVoice(voices) {
     if (!voices || voices.length === 0) return null;
 
-    // Tier 1: Microsoft Natural Online Voices (Edge / Windows)
+    // Tier 1: Microsoft Natural Online Voices (Edge / Windows: Jenny, Aria, Sonia)
     const naturalFemale = voices.find(v => 
         v.name.includes("Natural") && (v.name.includes("Jenny") || v.name.includes("Aria") || v.name.includes("Sonia") || v.name.includes("Female"))
     );
     if (naturalFemale) return naturalFemale;
 
-    // Tier 2: Google Premium Voices (Chrome / Android)
-    const googleFemale = voices.find(v => 
-        v.name.includes("Google") && (v.name.includes("UK English Female") || v.name.includes("US English") || v.name.toLowerCase().includes("female"))
-    );
+    // Tier 2: Google Premium Voices (Google UK English Female sounds far better than US)
+    const googleUkFemale = voices.find(v => v.name.includes("Google") && v.name.includes("UK English Female"));
+    if (googleUkFemale) return googleUkFemale;
+
+    const googleFemale = voices.find(v => v.name.includes("Google") && (v.name.includes("Female") || v.name.includes("US English")));
     if (googleFemale) return googleFemale;
 
     // Tier 3: Apple / Safari Voices (Samantha, Victoria, Karen, Moira)
@@ -63,3 +64,64 @@ export function selectGraceVoice(voices) {
     return anyEnglish || voices[0];
 }
 
+// Global reference to prevent Chrome garbage-collecting the utterance mid-speech
+let currentUtterance = null;
+
+/**
+ * Plays speech cleanly with fast natural pacing and Chrome GC protection.
+ */
+export function speakGrace(text, onStart, onEnd) {
+    if (!('speechSynthesis' in window)) return;
+
+    const cleaned = cleanSpeechText(text);
+    if (!cleaned) return;
+
+    // Cancel any current speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    currentUtterance = utterance; // Keep alive in memory
+
+    const voices = window.speechSynthesis.getVoices();
+    const voice = selectGraceVoice(voices);
+    if (voice) {
+        utterance.voice = voice;
+    }
+
+    // Snappy, energetic conversational speed (no dragging slowness)
+    utterance.rate = 1.25;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+        if (onStart) onStart();
+    };
+
+    utterance.onend = () => {
+        currentUtterance = null;
+        if (onEnd) onEnd();
+    };
+
+    utterance.onerror = () => {
+        currentUtterance = null;
+        if (onEnd) onEnd();
+    };
+
+    // Chrome resume fix
+    if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+    }
+
+    // Slight delay to avoid browser audio lock
+    setTimeout(() => {
+        window.speechSynthesis.speak(utterance);
+    }, 25);
+}
+
+export function stopGraceSpeech() {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
+    if (currentUtterance) {
+        currentUtterance = null;
+    }
+}

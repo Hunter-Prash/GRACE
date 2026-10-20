@@ -1,51 +1,37 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Send, Mic, MicOff } from 'lucide-react';
 
 const InputBox = ({ input, setInput, handleSend, stopSpeaking, isSpeaking }) => {
     const [isListening, setIsListening] = useState(false);
     const recognitionRef = useRef(null);
+    const shouldListenRef = useRef(false);
     const baseTextRef = useRef('');
 
-    // Cleanup speech recognition on unmount
+    // Cleanup on unmount
     useEffect(() => {
         return () => {
+            shouldListenRef.current = false;
             if (recognitionRef.current) {
                 try {
                     recognitionRef.current.abort();
-                } catch (e) {
-                    // Ignore abort errors on unmount
+                } catch {
+                    /* ignore cleanup error */
                 }
             }
         };
     }, []);
 
-    const toggleListen = () => {
-        // If Grace is currently speaking, shut her up immediately
-        if (stopSpeaking) {
-            stopSpeaking();
-        }
-
+    const startRecognition = () => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
             alert("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
             return;
         }
 
-        if (isListening) {
-            if (recognitionRef.current) {
-                try {
-                    recognitionRef.current.stop();
-                } catch (e) {
-                    // Ignore
-                }
-            }
-            setIsListening(false);
-            return;
-        }
-
         try {
             const rec = new SpeechRecognition();
-            rec.continuous = false;
+            // Continuous listening so it doesn't shut down after 1 second
+            rec.continuous = true;
             rec.interimResults = true;
             rec.lang = 'en-US';
 
@@ -60,40 +46,86 @@ const InputBox = ({ input, setInput, handleSend, stopSpeaking, isSpeaking }) => 
                 let finalTranscript = '';
 
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const text = event.results[i][0].transcript;
                     if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
+                        finalTranscript += text + ' ';
                     } else {
-                        interimTranscript += event.results[i][0].transcript;
+                        interimTranscript += text;
                     }
                 }
 
                 const currentBase = baseTextRef.current ? baseTextRef.current.trim() + ' ' : '';
-                const spoken = finalTranscript || interimTranscript;
-                setInput(currentBase + spoken);
+                const spoken = (finalTranscript + interimTranscript).trim();
+                if (spoken) {
+                    setInput(currentBase + spoken);
+                }
             };
 
             rec.onerror = (event) => {
-                console.warn("Speech recognition error:", event.error);
-                if (event.error === 'not-allowed') {
-                    alert("Microphone access was denied. Please allow microphone permissions in your browser.");
+                console.warn("Speech recognition notice:", event.error);
+                // Do NOT shut down on brief silence / no-speech!
+                if (event.error === 'no-speech') {
+                    return;
                 }
-                setIsListening(false);
+                if (event.error === 'not-allowed') {
+                    alert("Microphone permission was denied. Please allow microphone access in your browser address bar.");
+                    shouldListenRef.current = false;
+                    setIsListening(false);
+                    return;
+                }
             };
 
             rec.onend = () => {
-                setIsListening(false);
+                // If user hasn't explicitly stopped, keep listening alive (prevent 1s dropouts)
+                if (shouldListenRef.current) {
+                    try {
+                        rec.start();
+                    } catch {
+                        setIsListening(false);
+                        shouldListenRef.current = false;
+                    }
+                } else {
+                    setIsListening(false);
+                }
             };
 
             recognitionRef.current = rec;
+            shouldListenRef.current = true;
             rec.start();
         } catch (err) {
-            console.error("Failed to start speech recognition:", err);
+            console.error("Speech recognition startup error:", err);
+            shouldListenRef.current = false;
             setIsListening(false);
         }
     };
 
+    const stopRecognition = () => {
+        shouldListenRef.current = false;
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.stop();
+            } catch {
+                /* ignore stop error */
+            }
+        }
+        setIsListening(false);
+    };
+
+    const toggleListen = () => {
+        // Stop any active Grace voice response immediately
+        if (stopSpeaking) {
+            stopSpeaking();
+        }
+
+        if (isListening) {
+            stopRecognition();
+        } else {
+            startRecognition();
+        }
+    };
+
     const handleTextChange = (e) => {
-        // If user starts typing while Grace is speaking, cut off Grace's voice immediately
+        // If Grace is speaking when user types, silence her immediately
         if (isSpeaking && stopSpeaking) {
             stopSpeaking();
         }
@@ -106,32 +138,30 @@ const InputBox = ({ input, setInput, handleSend, stopSpeaking, isSpeaking }) => 
                 <form
                     onSubmit={(e) => {
                         e.preventDefault();
-                        if (isListening && recognitionRef.current) {
-                            try { recognitionRef.current.stop(); } catch (err) {}
-                            setIsListening(false);
+                        if (isListening) {
+                            stopRecognition();
                         }
                         handleSend(e);
                     }}
                     className={`flex items-end gap-1 sm:gap-2 bg-[#0a1114] border rounded-xl p-1.5 sm:p-2 shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all w-full ${
                         isListening 
-                            ? 'border-red-500/70 shadow-[0_0_20px_rgba(239,68,68,0.25)]' 
+                            ? 'border-red-500/80 shadow-[0_0_20px_rgba(239,68,68,0.3)]' 
                             : 'border-cyan-900/40 focus-within:border-cyan-500/60'
                     }`}
                 >
                     <textarea
                         value={input}
                         onChange={handleTextChange}
-                        placeholder={isListening ? "Listening... Speak to Grace" : "Type a message or tap the mic to speak..."}
+                        placeholder={isListening ? "Listening continuously... Speak now" : "Type a message or tap the mic to speak..."}
                         className={`flex-1 max-h-32 min-h-[44px] bg-transparent resize-none outline-none p-3 text-cyan-50 transition-colors ${
-                            isListening ? 'placeholder:text-red-400/80 animate-pulse' : 'placeholder:text-cyan-900/60'
+                            isListening ? 'placeholder:text-red-400 font-medium' : 'placeholder:text-cyan-900/60'
                         }`}
                         rows={1}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
                                 e.preventDefault();
-                                if (isListening && recognitionRef.current) {
-                                    try { recognitionRef.current.stop(); } catch (err) {}
-                                    setIsListening(false);
+                                if (isListening) {
+                                    stopRecognition();
                                 }
                                 handleSend(e);
                             }
@@ -142,10 +172,10 @@ const InputBox = ({ input, setInput, handleSend, stopSpeaking, isSpeaking }) => 
                     <button
                         type="button"
                         onClick={toggleListen}
-                        title={isListening ? "Stop listening" : "Speak to Grace"}
+                        title={isListening ? "Stop listening" : "Start speaking"}
                         className={`p-3 mb-0.5 rounded-lg border transition-all cursor-pointer ${
                             isListening 
-                                ? 'bg-red-500/20 text-red-400 border-red-500/60 hover:bg-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' 
+                                ? 'bg-red-500/25 text-red-400 border-red-500/80 hover:bg-red-500/35 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse' 
                                 : 'bg-cyan-950/50 text-cyan-400 border-cyan-900/50 hover:bg-cyan-900/50 hover:text-cyan-300'
                         }`}
                     >
@@ -164,8 +194,10 @@ const InputBox = ({ input, setInput, handleSend, stopSpeaking, isSpeaking }) => 
                 </form>
 
                 <div className="flex items-center justify-between mt-2 px-1 text-[10px] tracking-widest text-slate-500">
-                    <span>{isListening ? "● LISTENING..." : "GRACE LIFE OS // INTERFACE"}</span>
-                    <span>ENTER TO SEND / SHIFT+ENTER NEW LINE</span>
+                    <span className={isListening ? "text-red-400 font-bold" : ""}>
+                        {isListening ? "● LISTENING (TAP MIC TO FINISH)" : "GRACE LIFE OS // INTERFACE"}
+                    </span>
+                    <span>ENTER TO SEND</span>
                 </div>
             </div>
         </footer>

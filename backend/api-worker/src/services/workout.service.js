@@ -8,6 +8,7 @@ const KNOWN_EXERCISES = [
     "bench-press",
     "barbell-row",
     "pull-up",
+    "assisted-pull-up",
     "overhead-press",
     "romanian-deadlift",
     "plank",
@@ -22,18 +23,73 @@ const KNOWN_EXERCISES = [
     "lateral-raise",
     "cable-crunch",
     "ab-wheel",
-    // Extras for standard coverage
     "bicep-curl",
+    "barbell-curl",
+    "dumbbell-curl",
+    "cable-curl",
+    "hammer-curl",
     "tricep-extension",
+    "tricep-pushdown",
     "push-up",
-    "dumbbell-row"
+    "dumbbell-row",
+    "chest-supported-row",
+    "seated-cable-row",
+    "face-pull",
+    "leg-curl",
+    "leg-extension",
+    "calf-raise"
 ];
 
-// Helper: Get current IST Date String (YYYY-MM-DD)
-function getISTDateString() {
-    const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+// Helper: Get IST Date String (YYYY-MM-DD), with support for relative words and past dates
+export function getISTDateString(dateInput) {
     const pad = (n) => n < 10 ? '0' + n : n;
+    const now = new Date();
+    const currentIstMs = now.getTime() + (5.5 * 60 * 60 * 1000);
+
+    if (!dateInput) {
+        const istTime = new Date(currentIstMs);
+        return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
+    }
+
+    if (typeof dateInput === 'string') {
+        const trimmed = dateInput.trim();
+        const lower = trimmed.toLowerCase();
+
+        if (lower === 'today') {
+            const istTime = new Date(currentIstMs);
+            return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
+        }
+
+        if (lower === 'yesterday') {
+            const istTime = new Date(currentIstMs - (24 * 60 * 60 * 1000));
+            return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
+        }
+
+        const daysAgoMatch = lower.match(/^(\d+)\s+days?\s+ago$/i);
+        if (daysAgoMatch) {
+            const days = parseInt(daysAgoMatch[1], 10);
+            const istTime = new Date(currentIstMs - (days * 24 * 60 * 60 * 1000));
+            return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
+        }
+
+        // Direct YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+            return trimmed;
+        }
+
+        const parsed = new Date(trimmed);
+        if (!isNaN(parsed.getTime())) {
+            const istTime = new Date(parsed.getTime() + (5.5 * 60 * 60 * 1000));
+            return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
+        }
+    }
+
+    if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+        const istTime = new Date(dateInput.getTime() + (5.5 * 60 * 60 * 1000));
+        return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
+    }
+
+    const istTime = new Date(currentIstMs);
     return istTime.getUTCFullYear() + '-' + pad(istTime.getUTCMonth() + 1) + '-' + pad(istTime.getUTCDate());
 }
 
@@ -57,13 +113,18 @@ function normalizeExercise(rawName) {
 /**
  * 1. Log a Workout Set
  * Uses UpdateItem with list_append to add a new set to an exercise.
- * If the exercise doesn't exist for today, it creates it.
+ * Supports saving progress for today or a specific past date (e.g. yesterday, DX).
  */
-export async function logWorkoutSet(rawExerciseName, reps, weight) {
+export async function logWorkoutSet(rawExerciseName, reps, weight, targetDate) {
     const exerciseName = normalizeExercise(rawExerciseName);
-    const dateStr = getISTDateString();
+    const dateStr = getISTDateString(targetDate);
+    const todayStr = getISTDateString();
 
-    const newSet = { reps: reps, weight: weight, timestamp: new Date().toISOString() };
+    const timestamp = (dateStr === todayStr)
+        ? new Date().toISOString()
+        : `${dateStr}T12:00:00.000+05:30`;
+
+    const newSet = { reps: reps, weight: weight, timestamp: timestamp };
 
     const command = new UpdateCommand({
         TableName: "Grace_Workouts",
@@ -87,6 +148,7 @@ export async function logWorkoutSet(rawExerciseName, reps, weight) {
         const response = await docClient.send(command);
         return {
             success: true,
+            date: dateStr,
             normalizedExercise: exerciseName, // Return the fixed name so Grace knows what it was saved as
             data: response.Attributes
         };
@@ -97,11 +159,11 @@ export async function logWorkoutSet(rawExerciseName, reps, weight) {
 }
 
 /**
- * 2. Get Today's Workout
- * Queries the main table for all exercises on the current IST date.
+ * 2. Get Workout For Date (defaults to Today)
+ * Queries the main table for all exercises on the specified date or current IST date.
  */
-export async function getTodaysWorkout() {
-    const dateStr = getISTDateString();
+export async function getTodaysWorkout(targetDate) {
+    const dateStr = getISTDateString(targetDate);
 
     const command = new QueryCommand({
         TableName: "Grace_Workouts",
@@ -116,9 +178,11 @@ export async function getTodaysWorkout() {
 
     try {
         const response = await docClient.send(command);
-        return response.Items || [];
+        const items = response.Items || [];
+        items.date = dateStr;
+        return items;
     } catch (e) {
-        console.error("Error fetching today's workout:", e);
+        console.error("Error fetching workout for date:", dateStr, e);
         throw e;
     }
 }

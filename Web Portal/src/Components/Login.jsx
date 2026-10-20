@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 
@@ -38,7 +38,7 @@ export default function Login({ setToken }) {
         try {
             const res = await axios.post(`${BACKEND_URL}/api/auth/forgot-password`, { email });
             setMessage(res.data.message);
-        } catch (error) {
+        } catch {
             setMessage('Failed to send magic link');
         }
         setLoading(false);
