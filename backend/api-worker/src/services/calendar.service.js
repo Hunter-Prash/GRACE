@@ -124,7 +124,11 @@ export async function getCalendarEvents(timeMin, timeMax) {
             link: event.htmlLink
         }));
     } catch (err) {
-        console.error("[CALENDAR] API Error:", err.message);
+        if (err.message === 'invalid_grant' || err.response?.data?.error === 'invalid_grant') {
+            console.error("[CALENDAR] API Error: Google OAuth token has expired or been revoked ('invalid_grant'). Run auth_calendar.js to refresh token.json.");
+        } else {
+            console.error("[CALENDAR] API Error:", err.message);
+        }
         throw err;
     }
 }

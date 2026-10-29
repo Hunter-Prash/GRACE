@@ -181,7 +181,7 @@ export const handler = async (event = {}) => {
         const now = new Date(); // Current time in UTC
         const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // Get current time in IST
         
-        // Manual override check (for instant test triggers via EventBridge or manual invocation)
+        // Manual override check (for instant test triggers via EventBridge, CLI, or manual invocation)
         if (event.action === 'triggerBrainDump' || event.forceBrainDump === true) {
             console.log("[CRON] Manual Brain Dump trigger received!");
             await runDailyBrainDumpReview();
@@ -192,29 +192,73 @@ export const handler = async (event = {}) => {
             await generateDailyMotivation();
             return { statusCode: 200, body: 'Successfully executed manual Motivation trigger.' };
         }
+        if (event.action === 'triggerWeeklyStrategy' || event.forceStrategy === true) {
+            console.log("[CRON] Manual Weekly Strategy trigger received!");
+            await runWeeklyStrategy();
+            return { statusCode: 200, body: 'Successfully executed manual Weekly Strategy trigger.' };
+        }
+        if (event.action === 'triggerGoalAnalyzer' || event.forceGoals === true) {
+            console.log("[CRON] Manual Goal Analyzer trigger received!");
+            await runGoalAnalyzer();
+            return { statusCode: 200, body: 'Successfully executed manual Goal Analyzer trigger.' };
+        }
+        if (event.action === 'triggerCalendar' || event.forceCalendar === true) {
+            console.log("[CRON] Manual Calendar check trigger received!");
+            await checkUpcomingEvents(now);
+            return { statusCode: 200, body: 'Successfully executed manual Calendar check trigger.' };
+        }
+        if (event.action === 'triggerAll' || event.forceAll === true) {
+            console.log("[CRON] Manual Trigger ALL received!");
+            await checkUpcomingEvents(now);
+            await generateDailyMotivation();
+            await runDailyBrainDumpReview();
+            await runGoalAnalyzer();
+            await runWeeklyStrategy();
+            return { statusCode: 200, body: 'Successfully executed all cron triggers.' };
+        }
 
         // 1. Every 1 Hour: Check for upcoming calendar events only
-        await checkUpcomingEvents(now);
+        try {
+            await checkUpcomingEvents(now);
+        } catch (calErr) {
+            console.error("[CRON] Calendar check failed (skipping to other scheduled tasks):", calErr.message || calErr);
+        }
 
         // 2. Once every 24 Hours at 9:00 PM IST (21:00): Daily Brain Dump Review
         if (istTime.getUTCHours() === 21) {
-            await runDailyBrainDumpReview();
+            try {
+                await runDailyBrainDumpReview();
+            } catch (err) {
+                console.error("[CRON] Daily Brain Dump Review failed:", err.message || err);
+            }
         }
 
         // 3. Sundays at 6:00 PM IST: Run Weekly Strategy
         // getDay() 0 = Sunday, getHours() 18 = 6 PM
         if (istTime.getUTCDay() === 0 && istTime.getUTCHours() === 18) {
-            await runWeeklyStrategy();
+            try {
+                await runWeeklyStrategy();
+            } catch (err) {
+                console.error("[CRON] Weekly Strategy failed:", err.message || err);
+            }
         }
 
         // 4. Every Saturday at 12:00 PM IST: Goal Analyzer
         if (istTime.getUTCDay() === 6 && istTime.getUTCHours() === 12) {
-             await runGoalAnalyzer();
+            try {
+                await runGoalAnalyzer();
+            } catch (err) {
+                console.error("[CRON] Goal Analyzer failed:", err.message || err);
+            }
         }
 
         // 5. Every day at 7:00 AM IST: Daily Motivation
         if (istTime.getUTCHours() === 7) {
-             await generateDailyMotivation();
+            try {
+                await generateDailyMotivation();
+            } catch (err) {
+                console.error("[CRON] Daily Motivation failed:", err.message || err);
+            }
         }
 
         return { statusCode: 200, body: 'Successfully ran cron dispatcher.' };
