@@ -2,9 +2,15 @@
 // Usage: node test-unindexed-count.js [sessionId]
 //   sessionId defaults to "default"
 
-import './env.js';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const TABLE_NAME = "GraceChatSessions";
 const SESSION_ID = process.argv[2] || "default";

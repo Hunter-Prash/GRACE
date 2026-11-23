@@ -45,16 +45,22 @@ export default function App() {
     // Play/Stop a specific message
     const handleSpeakMessage = useCallback((text) => {
         if (speakingText === text) {
+            // Toggle off — user clicked STOP on the currently-speaking message
             stopSpeaking();
             return;
         }
 
-        stopSpeaking();
+        // Cancel any current speech at the low level (without resetting React state
+        // to null first, which caused a re-render race that killed the new utterance).
+        stopGraceSpeech();
+
+        // Immediately set the NEW speaking target so the UI highlights the right button
         setSpeakingText(text);
         speakGrace(
             text,
             () => setIsSpeaking(true),
             () => {
+                // Natural end of speech — reset state
                 setIsSpeaking(false);
                 setSpeakingText(null);
             }

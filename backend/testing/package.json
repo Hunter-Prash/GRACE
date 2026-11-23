@@ -1,0 +1,6 @@
+{
+  "name": "grace-testing",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Dedicated test suite for Grace backend services"
+}

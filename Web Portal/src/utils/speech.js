@@ -66,6 +66,18 @@ export function selectGraceVoice(voices) {
 
 // Global reference to prevent Chrome garbage-collecting the utterance mid-speech
 let currentUtterance = null;
+// Guard flag: suppress onend/onerror callbacks triggered by cancel() so they don't
+// race with the NEW utterance's state and cause the 0.1s cutoff bug.
+let isCancelling = false;
+// Chrome keepalive interval — prevents Chrome from silently killing long utterances
+let keepAliveInterval = null;
+
+function clearKeepAlive() {
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
+    }
+}
 
 /**
  * Plays speech cleanly with fast natural pacing and Chrome GC protection.
@@ -76,7 +88,9 @@ export function speakGrace(text, onStart, onEnd) {
     const cleaned = cleanSpeechText(text);
     if (!cleaned) return;
 
-    // Cancel any current speech
+    // Set guard BEFORE cancel so the old utterance's onend is suppressed
+    isCancelling = true;
+    clearKeepAlive();
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(cleaned);
@@ -94,14 +108,29 @@ export function speakGrace(text, onStart, onEnd) {
 
     utterance.onstart = () => {
         if (onStart) onStart();
+        // Chrome bug workaround: Chrome kills utterances after ~15s of continuous speech.
+        // Pause+resume every 10s keeps the audio stream alive.
+        clearKeepAlive();
+        keepAliveInterval = setInterval(() => {
+            if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+                window.speechSynthesis.pause();
+                window.speechSynthesis.resume();
+            }
+        }, 10000);
     };
 
     utterance.onend = () => {
+        // If this was fired by cancel() during a switch, ignore it
+        if (isCancelling) return;
+        clearKeepAlive();
         currentUtterance = null;
         if (onEnd) onEnd();
     };
 
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+        // 'interrupted' and 'canceled' errors are expected when we call cancel()
+        if (isCancelling || e.error === 'interrupted' || e.error === 'canceled') return;
+        clearKeepAlive();
         currentUtterance = null;
         if (onEnd) onEnd();
     };
@@ -111,17 +140,18 @@ export function speakGrace(text, onStart, onEnd) {
         window.speechSynthesis.resume();
     }
 
-    // Slight delay to avoid browser audio lock
+    // Slight delay to let cancel() fully settle, then speak and clear the guard
     setTimeout(() => {
+        isCancelling = false;
         window.speechSynthesis.speak(utterance);
-    }, 25);
+    }, 50);
 }
 
 export function stopGraceSpeech() {
-    if ('speechSynthesis' in window) {
+    isCancelling = false; // We WANT the onend to fire for a real stop
+    clearKeepAlive();
+    if (currentUtterance && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
     }
-    if (currentUtterance) {
-        currentUtterance = null;
-    }
+    currentUtterance = null;
 }

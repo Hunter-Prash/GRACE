@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { handler } from './src/cron.js';
+import { handler } from '../api-worker/src/cron.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,4 +36,3 @@ handler({ action })
         console.error("\nCRON EXECUTION ERROR:", err);
         process.exit(1);
     });
-

@@ -237,15 +237,14 @@ export const BASE_TOOLS = [{
         },
         {
             name: "captureBrainDump",
-            description: "Saves a quick thought, note, reminder, idea, or personal detail for Prashant. Call this whenever he asks to remember, note down, save a thought, or record where he placed an item.",
+            description: "Saves a quick thought, note, reminder, idea, item location, or personal detail for Prashant. Call this whenever he asks to remember, note down, save, remind, track, or record anything.",
             parameters: {
                 type: "OBJECT",
                 properties: {
                     content: { type: "STRING", description: "The exact thought, note, reminder, or item location to record." },
                     category: { 
                         type: "STRING", 
-                        enum: ["Reminder", "Personal", "Family", "Idea", "Item_Location", "Admin"],
-                        description: "The auto-detected category for the thought."
+                        description: "Optional category for the note (e.g., 'Reminder', 'Personal', 'Family', 'Idea', 'Item_Location', 'Admin', 'Work'). Defaults to 'Personal' if omitted."
                     },
                     dueDate: { type: "STRING", description: "Optional date or day if a deadline or reminder date was mentioned (e.g. '2026-10-20' or 'Tuesday')" },
                     tags: { 
@@ -254,12 +253,12 @@ export const BASE_TOOLS = [{
                         description: "Optional array of 1-3 keywords/tags to categorize the note." 
                     }
                 },
-                required: ["content", "category"]
+                required: ["content"]
             }
         },
         {
             name: "getBrainDumpNotes",
-            description: "Fetches Prashant's saved thoughts, notes, or reminders. Use when he asks 'what did I note down', 'what are my reminders', 'what did Mom ask for', or 'where did I put X'.",
+            description: "Fetches Prashant's saved thoughts, notes, reminders, or item locations. Use when he asks 'what did I note down', 'what are my reminders', 'what did Mom ask for', 'where did I put X', or asks to check/review/list any saved notes, ideas, or thoughts.",
             parameters: {
                 type: "OBJECT",
                 properties: {

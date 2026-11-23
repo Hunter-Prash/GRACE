@@ -4,9 +4,16 @@ import { logToDiscord } from "./logger.service.js";
 
 let mcpClient = null;
 let mcpToolsCache = [];
+let mcpAttempted = false;
 
 export async function initMcpClient() {
-    if (mcpClient) return;
+    if (mcpClient || mcpAttempted) return;
+
+    // Do NOT attempt to run local desktop filesystem MCP server inside AWS Lambda
+    if (process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT) {
+        mcpAttempted = true;
+        return;
+    }
 
     try {
         console.log("[MCP] Initializing MCP Client...");
@@ -14,9 +21,14 @@ export async function initMcpClient() {
         // On Windows, use npx.cmd to avoid ENOENT errors in child_process spawn
         const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
+        // Base directory access for Filesystem MCP. Defaults to user's home directory,
+        // giving Grace access to Desktop, Downloads, Documents, etc.
+        const defaultPath = process.env.MCP_FILESYSTEM_PATH || process.env.HOME || '/home/prashant-rajaji';
+        const allowedPaths = defaultPath.split(',').map(p => p.trim());
+
         const transport = new StdioClientTransport({
             command: command,
-            args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/prashant-rajaji/Desktop"]
+            args: ["-y", "@modelcontextprotocol/server-filesystem", ...allowedPaths]
         });
 
         mcpClient = new Client({
@@ -42,6 +54,7 @@ export async function initMcpClient() {
     } catch (error) {
         console.error("[MCP] Initialization failed:", error);
         mcpClient = null;
+        mcpAttempted = true;
     }
 }
 
