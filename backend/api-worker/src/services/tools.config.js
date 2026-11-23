@@ -292,6 +292,47 @@ export const BASE_TOOLS = [{
                 },
                 required: ["mealType"]
             }
+        },
+        {
+            name: "evaluateImpulseSpend",
+            description: "Evaluates whether an impulse purchase, gadget, game, gear, course, or discretionary expense is 'worth it' for Prashant. Calculates the exact hours and workdays of software engineering at TCS needed to pay for the item, audits current month's entertainment/discretionary spending, and recommends an objective cooling-off waiting period.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    itemName: { type: "STRING", description: "The name of the item, gadget, course, game, or service (e.g. 'Mechanical Keyboard', 'Gaming Monitor', 'Steam Game', 'Noise Cancelling Headphones')." },
+                    amount: { type: "NUMBER", description: "The price or cost of the item in INR (₹)." },
+                    category: { type: "STRING", description: "Optional category: entertainment, career, essentials, or transport. Defaults to 'entertainment'." },
+                    estimatedMonthlySalary: { type: "NUMBER", description: "Optional net monthly salary in INR if specified, defaults to TCS baseline." }
+                },
+                required: ["itemName", "amount"]
+            }
+        },
+        {
+            name: "getAwsCostReport",
+            description: "Fetches Prashant's AWS cloud costs, including previous month's finalized bill, current month-to-date running spend, and payment status (checks whether an unpaid bill is pending in reminders).",
+            parameters: {
+                type: "OBJECT",
+                properties: {}
+            }
+        },
+        {
+            name: "markAwsBillPaid",
+            description: "Marks Prashant's pending AWS cloud bill as paid, completes the active reminder note in BrainDump, and automatically records the expense in his finance tracker under career expenses.",
+            parameters: {
+                type: "OBJECT",
+                properties: {}
+            }
+        },
+        {
+            name: "playMedia",
+            description: "Plays a song, track, music video, playlist, or audio stream on YouTube or web media. Automatically resolves the exact YouTube video ID and passes the direct watch URL with autoplay so the client spawns the song directly (via native YouTube app on mobile, or desktop browser/player on PC).",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    query: { type: "STRING", description: "The song title, artist, or media query (e.g. 'Starboy The Weeknd', 'Lofi hip hop chill beats', 'Gym workout phonk')." }
+                },
+                required: ["query"]
+            }
         }
     ]
 }];

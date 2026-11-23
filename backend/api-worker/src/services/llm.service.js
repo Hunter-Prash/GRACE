@@ -8,7 +8,9 @@ import { logToDiscord } from './logger.service.js';
 import { initMcpClient, getMcpTools, callMcpTool } from './mcp.service.js';
 import { getCurrentDateTime } from './datetime.service.js';
 import { getCalendarEvents, scheduleEvent, rescheduleEvent, cancelEvent } from './calendar.service.js';
-import { getTransactions, addTransaction } from './finance.service.js';
+import { getTransactions, addTransaction, evaluateImpulseSpend } from './finance.service.js';
+import { getAwsCostReport, markAwsBillPaid } from './awsCost.service.js';
+import { searchYouTube } from './media.service.js';
 import { logWorkoutSet, getTodaysWorkout, getExerciseHistory } from './workout.service.js';
 import { saveBrainDump, getBrainDumpNotes, updateBrainDumpStatus } from './braindump.service.js';
 import { getMealContext } from './nutrition.service.js';
@@ -159,7 +161,10 @@ Filter every career-related response through this question: "How does this move 
 Whenever asked to perform any hard facts lookup, database query, calendar lookup, search, or data storage, you MUST ALWAYS use the LLM tools at your disposal. Do NOT blindly answer using short-term context or generic knowledge. Ensure accuracy by actively calling tools.
 - **Workout & Fitness Logging:** When Prashant tells you about exercises or sets, call \`logWorkoutSet\`. If he is logging for today, the date can be today or omitted. If he mentions logging a past workout (e.g. "yesterday", "on Sunday", "on 2026-10-18", or a past date DX), calculate the date in 'YYYY-MM-DD' format using your current time context and pass it in the \`date\` parameter so his workout history is maintained accurately for that specific date.
 - **Brain Dump & Notes (MANDATORY):** When Prashant asks you to remember, note down, save, record, track, or keep in mind ANY thought, note, reminder, idea, item location, or personal detail (e.g. "remember that I put my keys...", "note down this idea...", "save this thought...", "remind me to...", "don't let me forget..."), you MUST call \`captureBrainDump\`. NEVER just reply saying "Got it, I've noted that down" without invoking \`captureBrainDump\`! You must persist it via the tool first.
-- **Retrieving Notes & Reminders:** When Prashant asks what he noted down, asks for his reminders, asks where he placed an item, or asks to review his saved thoughts/ideas, you MUST call \`getBrainDumpNotes\`.`;
+- **Retrieving Notes & Reminders:** When Prashant asks what he noted down, asks for his reminders, asks where he placed an item, or asks to review his saved thoughts/ideas, you MUST call \`getBrainDumpNotes\`.
+- **"Worth It?" Impulse Spend Filter:** When Prashant is considering buying an item, gadget, game, gear, course, or discretionary service, or asks if a purchase is "worth it", or is contemplating an expense (e.g. "should I buy this...", "thinking of getting...", "is this ₹X worth it?"), you MUST call \`evaluateImpulseSpend\`. Do NOT give generic financial advice; run the evaluation tool to get his exact work-hours equivalent and monthly budget status, then give him an honest, grounded reality check with the recommended cooling-off period.
+- **AWS Cloud Billing & Cost Tracking:** When Prashant asks about his AWS bill, cloud costs, or month-to-date spend (e.g. "what's my AWS bill?", "how much did AWS cost last month?", "is my AWS bill paid?"), call \`getAwsCostReport\`. When he tells you he has paid the AWS bill (e.g. "I paid the AWS bill", "cleared the AWS payment"), call \`markAwsBillPaid\` to complete the reminder task and log the expense.
+- **Media & Music Playback:** When Prashant asks to play a song, track, video, or music (e.g. "play Starboy", "open YouTube and play X", "play some lofi beats"), you MUST call \`playMedia\`. Do NOT generate a generic search URL or just open the main YouTube page; always invoke \`playMedia\` so the system resolves the exact video ID and autoplays it directly across his PC and phone.`;
 
 
 
@@ -178,7 +183,7 @@ Whenever asked to perform any hard facts lookup, database query, calendar lookup
     // Initialize chat with tools
 
     const chat = aiClient.chats.create({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         history: dbHistory,
         config: {
             systemInstruction: systemInstruction,
@@ -239,8 +244,46 @@ Gemini never executes your code directly. It doesn't have access to your server,
                 }
                 else if (call.name === 'openResource') {
                     const args = call.args;
-                    clientCommands.push({ type: 'openResource', resourceName: args.resourceName });
-                    toolResult = { success: true, message: `Delegated command to user's local operating system to open ${args.resourceName}` };
+                    let targetUrl = args.resourceName;
+                    let videoId = null;
+
+                    // If user passed a query to open YouTube with a song, resolve to direct video!
+                    if (targetUrl.toLowerCase().includes("youtube.com/results?search_query=")) {
+                        const queryParam = targetUrl.split("search_query=")[1];
+                        if (queryParam) {
+                            const decoded = decodeURIComponent(queryParam);
+                            const media = await searchYouTube(decoded);
+                            if (media) {
+                                targetUrl = media.url;
+                                videoId = media.videoId;
+                            }
+                        }
+                    }
+
+                    clientCommands.push({
+                        type: 'openResource',
+                        resourceName: targetUrl,
+                        videoId: videoId
+                    });
+                    toolResult = { success: true, message: `Delegated command to open ${targetUrl}`, url: targetUrl, videoId };
+                }
+                else if (call.name === 'playMedia') {
+                    const args = call.args;
+                    const media = await searchYouTube(args.query);
+                    if (media) {
+                        clientCommands.push({
+                            type: 'openResource',
+                            resourceName: media.url,
+                            mediaType: 'youtube',
+                            videoId: media.videoId,
+                            title: media.title
+                        });
+                        toolResult = { success: true, message: `Playing "${media.title}"`, ...media };
+                    } else {
+                        const fallbackUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(args.query)}`;
+                        clientCommands.push({ type: 'openResource', resourceName: fallbackUrl });
+                        toolResult = { success: false, message: `Could not resolve video ID. Opened search for "${args.query}"`, url: fallbackUrl };
+                    }
                 }
                 else if (call.name === 'getActiveGoals') {
                     const goals = await getActiveGoals();
@@ -323,6 +366,19 @@ Gemini never executes your code directly. It doesn't have access to your server,
                     const args = call.args;
                     const res = await addTransaction(args.amount, args.categoryName, args.description, args.dateIsoString);
                     toolResult = { success: true, transactionId: res.id, message: res.message };
+                }
+                else if (call.name === 'evaluateImpulseSpend') {
+                    const args = call.args;
+                    const res = await evaluateImpulseSpend(args.itemName, args.amount, args.category, args.estimatedMonthlySalary);
+                    toolResult = { success: true, ...res };
+                }
+                else if (call.name === 'getAwsCostReport') {
+                    const res = await getAwsCostReport();
+                    toolResult = { success: true, ...res };
+                }
+                else if (call.name === 'markAwsBillPaid') {
+                    const res = await markAwsBillPaid();
+                    toolResult = { success: true, ...res };
                 }
                 else if (call.name === 'logWorkoutSet') {
                     const args = call.args;

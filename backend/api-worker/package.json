@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.1175.0",
     "@aws-sdk/client-dynamodb": "^3.1063.0",
     "@aws-sdk/client-eventbridge": "^3.1068.0",
     "@aws-sdk/client-sns": "^3.1068.0",
@@ -32,6 +33,7 @@
     "nodemailer": "^10.0.10",
     "nodemon": "^3.1.14",
     "string-similarity": "^4.0.4",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "yt-search": "^2.13.1"
   }
 }

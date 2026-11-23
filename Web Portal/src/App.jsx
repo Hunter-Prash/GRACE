@@ -135,6 +135,22 @@ export default function App() {
             // Automatically speak response at fast, crisp speed
             handleSpeakMessage(aiText);
 
+            // Handle cross-platform client commands (e.g. YouTube playback, deep links)
+            if (response.data?.clientCommands && Array.isArray(response.data.clientCommands)) {
+                const isAndroid = /Android/i.test(navigator.userAgent);
+                for (const cmd of response.data.clientCommands) {
+                    if (cmd.type === 'openResource' && cmd.resourceName) {
+                        if (isAndroid && cmd.videoId) {
+                            // On Android: Launch official native YouTube app directly to the video
+                            window.location.href = `intent://www.youtube.com/watch?v=${cmd.videoId}#Intent;package=com.google.android.youtube;scheme=https;end`;
+                        } else {
+                            // On Desktop PC browser: open target watch URL in a new tab with autoplay
+                            window.open(cmd.resourceName, '_blank');
+                        }
+                    }
+                }
+            }
+
         } catch (error) {
             console.error("Chat error:", error);
             const errorMsg = error.response?.data?.details || error.response?.data?.error || "I ran into a connection issue. Please try again.";

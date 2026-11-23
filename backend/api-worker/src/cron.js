@@ -1,6 +1,7 @@
 import { getCalendarEvents } from './services/calendar.service.js';
 import { getActiveGoals, getAllGoals } from './services/goals.service.js';
 import { getDueBrainDumps, getBrainDumpNotes } from './services/braindump.service.js';
+import { syncMonthlyAwsBillToBrainDump, checkMidMonthCostAnomaly } from './services/awsCost.service.js';
 import { logToDiscord } from './services/logger.service.js';
 import { getGeminiKey } from './config.js';
 import { GoogleGenAI } from '@google/genai';
@@ -55,7 +56,7 @@ Generate a very short, friendly, proactive heads-up message for Prashant. Be hel
 Keep it under 3 sentences. Output ONLY the message you want to send him. Do not use emojis unless absolutely necessary.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: prompt,
     });
 
@@ -85,7 +86,7 @@ Remind him of his ultimate goal of transitioning into Big Tech.
 Keep it concise, punchy, and formatted well for Discord. Do not use emojis unless absolutely necessary.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: prompt,
     });
 
@@ -113,7 +114,7 @@ Perform a deep, highly analytical review of everything he has accomplished so fa
 Draft a comprehensive, motivating, and strategic message analyzing his overall progress. Format it well for Discord without using unnecessary emojis.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: prompt,
     });
 
@@ -147,7 +148,7 @@ Write a concise, warm, and structured evening debrief for Prashant:
 3. Keep it calming, encouraging, and under 4-5 bullet points formatted cleanly for Discord. Do not use unnecessary emojis.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: prompt,
     });
 
@@ -161,13 +162,13 @@ async function generateDailyMotivation() {
     const prompt = `You are Grace, an insightful, grounded personal companion for Prashant. 
 It is 7:00 AM in the morning.
 
-Provide a genuinely thoughtful, powerful piece of motivational advice or philosophical perspective for him to start his day. 
+Provide a genuinely thoughtful, powerful piece of motivational advice taking inspiration from billionaries who shape the world..
 Guidelines:
 - Do NOT reference any goals, databases, milestones, work projects, or to-do lists.
 - Keep it concise (2-3 sentences max). Formatted cleanly for Discord without unnecessary emojis.`;
 
     const response = await aiClient.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: prompt,
     });
 
@@ -206,6 +207,16 @@ export const handler = async (event = {}) => {
             console.log("[CRON] Manual Calendar check trigger received!");
             await checkUpcomingEvents(now);
             return { statusCode: 200, body: 'Successfully executed manual Calendar check trigger.' };
+        }
+        if (event.action === 'triggerAwsBillSync' || event.forceAwsBill === true) {
+            console.log("[CRON] Manual AWS Bill Sync trigger received!");
+            const res = await syncMonthlyAwsBillToBrainDump();
+            return { statusCode: 200, body: JSON.stringify(res) };
+        }
+        if (event.action === 'triggerAwsCostCheck' || event.forceAwsCost === true) {
+            console.log("[CRON] Manual AWS Cost Check trigger received!");
+            const res = await checkMidMonthCostAnomaly();
+            return { statusCode: 200, body: JSON.stringify(res) };
         }
         if (event.action === 'triggerAll' || event.forceAll === true) {
             console.log("[CRON] Manual Trigger ALL received!");
@@ -258,6 +269,25 @@ export const handler = async (event = {}) => {
                 await generateDailyMotivation();
             } catch (err) {
                 console.error("[CRON] Daily Motivation failed:", err.message || err);
+            }
+        }
+
+        // 6. On 3rd and 4th of each month at 10:00 AM IST: Sync finalized AWS bill to BrainDump
+        const istDayOfMonth = istTime.getUTCDate();
+        if ((istDayOfMonth === 3 || istDayOfMonth === 4) && istTime.getUTCHours() === 10) {
+            try {
+                await syncMonthlyAwsBillToBrainDump();
+            } catch (err) {
+                console.error("[CRON] Monthly AWS Bill sync failed:", err.message || err);
+            }
+        }
+
+        // 7. On 10th and 20th of each month at 10:00 AM IST: Check mid-month cost burn/anomaly
+        if ((istDayOfMonth === 10 || istDayOfMonth === 20) && istTime.getUTCHours() === 10) {
+            try {
+                await checkMidMonthCostAnomaly();
+            } catch (err) {
+                console.error("[CRON] Mid-month AWS cost check failed:", err.message || err);
             }
         }
 

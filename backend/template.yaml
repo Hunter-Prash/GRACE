@@ -72,6 +72,12 @@ Resources:
             TableName: Grace_BrainDump
         - EventBridgePutEventsPolicy:
             EventBusName: grace-ai-bus
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+                - ce:GetCostForecast
+              Resource: "*"
       Events:
         ProxyApiRoot:
           Type: Api
@@ -121,6 +127,12 @@ Resources:
             TableName: Grace_Goals
         - DynamoDBCrudPolicy:
             TableName: Grace_BrainDump
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+                - ce:GetCostForecast
+              Resource: "*"
       Events:
         ScheduleEvent:
           Type: Schedule

@@ -67,7 +67,7 @@ CRITICAL INSTRUCTION 3: DO NOT REMOVE any thing in which the user has specifical
             while (retries > 0) {
                 try {
                     response = await ai.models.generateContent({
-                        model: 'gemini-3.1-flash-lite',
+                        model: 'gemini-3.5-flash-lite',
                         contents: `${summarizationPrompt}\n\n[NEW TRANSCRIPT]\n${rawBatches[i]}`
                     });
                     break;

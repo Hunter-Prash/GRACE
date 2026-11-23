@@ -414,19 +414,33 @@ async def pipeline_async(hud):
                         if cmd.get("type") == "openResource":
                             resource_name = cmd.get("resourceName", "")
                             app_dictionary = {
-                                "chrome": "chrome", "google chrome": "chrome", "edge": "msedge",
-                                "brave": "brave", "vscode": "code", "visual studio code": "code",
-                                "terminal": "wt", "command prompt": "cmd", "word": "winword",
-                                "excel": "excel", "powerpoint": "powerpnt", "calculator": "calc.exe",
-                                "notepad": "notepad", "spotify": "spotify:", "vlc": "vlc",
-                                "steam": "steam://", "epic": "com.epicgames.launcher://"
+                                "chrome": "google-chrome" if os.name != "nt" else "chrome",
+                                "google chrome": "google-chrome" if os.name != "nt" else "chrome",
+                                "edge": "microsoft-edge" if os.name != "nt" else "msedge",
+                                "brave": "brave-browser" if os.name != "nt" else "brave",
+                                "vscode": "code",
+                                "visual studio code": "code",
+                                "terminal": "gnome-terminal" if os.name != "nt" else "wt",
+                                "command prompt": "x-terminal-emulator" if os.name != "nt" else "cmd",
+                                "word": "libreoffice --writer" if os.name != "nt" else "winword",
+                                "excel": "libreoffice --calc" if os.name != "nt" else "excel",
+                                "calculator": "gnome-calculator" if os.name != "nt" else "calc.exe",
+                                "notepad": "gedit" if os.name != "nt" else "notepad",
+                                "spotify": "spotify",
+                                "vlc": "vlc",
+                                "steam": "steam",
+                                "epic": "com.epicgames.launcher://"
                             }
                             if resource_name.startswith("http"):
                                 webbrowser.open(resource_name)
                             else:
-                                exe = app_dictionary.get(resource_name.lower().strip())
+                                exe = app_dictionary.get(resource_name.lower().strip(), resource_name)
                                 if exe:
-                                    os.system(f'start "" "{exe}"')
+                                    if os.name == 'nt':
+                                        os.system(f'start "" "{exe}"')
+                                    else:
+                                        import subprocess
+                                        subprocess.Popen(exe, shell=True)
                         elif cmd.get("type") == "fileOperation":
                             hud.sig_context_scene.emit(cmd.get("data", {}))
 
